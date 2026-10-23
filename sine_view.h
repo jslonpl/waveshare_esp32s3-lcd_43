@@ -160,9 +160,9 @@ inline void create() {
     char text[110];
     // Opis, stale pola znakow i jednostka sa osobnymi obiektami. Aktualizacja
     // cyfry nie zmienia polozenia pozostalych znakow, opisu ani jednostki.
-    rmsValue = metricValueLabel(screen, 24, "U RMS =", 136, 85, 5, 228, "V");
-    maximumValue = metricValueLabel(screen, 280, "U max =", 388, 85, 5, 480, "V");
-    frequencyValue = metricValueLabel(screen, 536, "f =", 580, 68, 4, 656, "Hz");
+    rmsValue = metricValueLabel(screen, 24, "U RMS", 136, 85, 5, 228, "V");
+    maximumValue = metricValueLabel(screen, 280, "U max", 388, 85, 5, 480, "V");
+    frequencyValue = metricValueLabel(screen, 536, "FREQ", 620, 68, 4, 693, "Hz");
     label(screen, 24, 78, "u RMS [V]");
 
     // Siatka 100 V RMS oraz 0,5 okresu. Linie osi sa jasniejsze i grubsze.
