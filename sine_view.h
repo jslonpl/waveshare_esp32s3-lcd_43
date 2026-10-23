@@ -22,6 +22,7 @@ constexpr int kLeft = 80;
 constexpr int kTop = 110;
 constexpr int kWidth = 680;
 constexpr int kHeight = 280;
+constexpr int kFrequencyLeft = 546;
 // Jeden punkt na piksel zapobiega widocznej redukcji rozdzielczosci wykresu.
 // Wygladzenie pomiedzy probkami ADC wykonuje zadanie przetwarzania, poza LVGL.
 constexpr int kPointStride = 1;
@@ -157,8 +158,19 @@ inline void create() {
     char text[110];
     // Opis, stale pola znakow i jednostka sa osobnymi obiektami. Aktualizacja
     // cyfry nie zmienia polozenia pozostalych znakow, opisu ani jednostki.
-    rmsValue = metricValueLabel(screen, 24, "U RMS", 136, 85, 5, 228, "V");
-    frequencyValue = metricValueLabel(screen, 536, "FREQ", 620, 68, 4, 693, "Hz");
+    rmsValue = metricValueLabel(
+        screen, kLeft, "U RMS", kLeft + 80, 85, 5, kLeft + 174, "V");
+    //frequencyValue = metricValueLabel(screen, kFrequencyLeft, "FREQ", kFrequencyLeft + 84, 68, 4, 693, "Hz");
+    frequencyValue = metricValueLabel(
+        screen,
+        kFrequencyLeft,       // napis FREQ
+        "FREQ",
+        kFrequencyLeft + 100,  // początek wartości
+        68,                   // szerokość wartości
+        4,                    // liczba znaków
+        kFrequencyLeft + 173, // jednostka Hz
+        "Hz"
+    );
     label(screen, 24, 78, "u RMS [V]");
 
     // Siatka 100 V RMS oraz 0,5 okresu. Linie osi sa jasniejsze i grubsze.
