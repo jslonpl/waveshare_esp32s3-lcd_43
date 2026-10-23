@@ -448,7 +448,7 @@ private:
             snprintf(
                 frame.rms_value_text,
                 sizeof(frame.rms_value_text),
-                "%.1f",
+                "%.0f",
                 smoothRms_
             );
             snprintf(
