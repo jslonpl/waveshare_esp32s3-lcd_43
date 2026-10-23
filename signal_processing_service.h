@@ -328,7 +328,7 @@ private:
         const uint32_t frameStart = micros();
         size_t index = 0;
         const bool outsideAxis =
-            result.peak * gain > sine_view::kAxisLimitVolts;
+            measuredRms > sine_view::kAxisLimitVolts;
         const float displayWindowUs = result.displayEndUs - result.triggerUs;
 
         float coefficientCosine[kHarmonicCount]{};
@@ -344,7 +344,7 @@ private:
                 float(i) * displayWindowUs / kHarmonicFitPointCount;
             const float value =
                 (waveform::at(samples, sampleCount, t, index) -
-                 result.offset) * gain;
+                 result.offset) * gain * sine_view::kPeakToRmsScale;
 
             for (size_t harmonic = 0; harmonic < kHarmonicCount; ++harmonic) {
                 coefficientCosine[harmonic] +=
@@ -509,7 +509,7 @@ private:
             snprintf(
                 frame.status_text,
                 sizeof(frame.status_text),
-                "%s | przebieg poza osia +/-400; obraz przyciety",
+                "%s | przebieg poza osia +/-300 V RMS; obraz przyciety",
                 calibrated ? "POMIAR" : "BEZ KALIBRACJI"
             );
         }

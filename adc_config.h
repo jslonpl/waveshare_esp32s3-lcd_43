@@ -20,6 +20,6 @@ constexpr float triggerHysteresisV = 0.03f;
 // REQUIRED calibration: measured mains RMS / reported ADC AC RMS.
 // 0 = uncalibrated. No mains RMS or mains peak is claimed in this mode.
 constexpr float mainsVoltsPerAdcVolt = 402.42f;
-// Display-only gain so the signal is visible on the ORIGINAL +/-400 axis.
+// Display-only gain so the signal is visible on the +/-300 V RMS axis.
 constexpr float previewGain = 300.0f;
 }

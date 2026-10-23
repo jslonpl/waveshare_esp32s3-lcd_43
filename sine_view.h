@@ -13,7 +13,11 @@
 namespace sine_view {
 constexpr size_t kDisplayedPeriods = 3;
 constexpr int kHorizontalDivisions = int(kDisplayedPeriods) * 2;
-constexpr float kAxisLimitVolts = 400.0f;
+// Krzywa jest prezentowana w skali RMS. Dla przebiegu sinusoidalnego kazda
+// wartosc chwilowa jest dzielona przez sqrt(2), wiec typowe 230 V RMS zajmuje
+// na osi tyle samo miejsca co +/-230 V zamiast +/-325 V wartosci szczytowej.
+constexpr float kAxisLimitVolts = 300.0f;
+constexpr float kPeakToRmsScale = 0.70710678118f;
 constexpr int kLeft = 80;
 constexpr int kTop = 110;
 constexpr int kWidth = 680;
@@ -159,10 +163,10 @@ inline void create() {
     rmsValue = metricValueLabel(screen, 24, "U RMS =", 136, 85, 5, 228, "V");
     maximumValue = metricValueLabel(screen, 280, "U max =", 388, 85, 5, 480, "V");
     frequencyValue = metricValueLabel(screen, 536, "f =", 580, 68, 4, 656, "Hz");
-    label(screen, 24, 78, "u [V]");
+    label(screen, 24, 78, "u RMS [V]");
 
-    // Siatka 100 V oraz 0,5 okresu. Linie osi sa jasniejsze i grubsze.
-    for (int volts = -400; volts <= 400; volts += 100) {
+    // Siatka 100 V RMS oraz 0,5 okresu. Linie osi sa jasniejsze i grubsze.
+    for (int volts = -300; volts <= 300; volts += 100) {
         const int y = voltageToY(static_cast<float>(volts));
         bar(screen, kLeft, y, kWidth + 1, volts == 0 ? 2 : 1,
             volts == 0 ? 0xCDD9E5 : 0x344351);
