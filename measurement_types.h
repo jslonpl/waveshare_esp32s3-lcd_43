@@ -26,7 +26,6 @@ struct MeasurementRecord {
     uint32_t sequence = 0;
     uint64_t timestamp_us = 0;
     float rms = 0;
-    float peak = 0;
     float frequency = 0;
     float offset = 0;
     float minimum = 0;
@@ -80,7 +79,6 @@ struct DisplayFrame {
     AcquisitionMetrics acquisition;
     ProcessingMetrics processing;
     char rms_value_text[16]{};
-    char maximum_value_text[16]{};
     char frequency_value_text[16]{};
     char status_text[120]{};
 };

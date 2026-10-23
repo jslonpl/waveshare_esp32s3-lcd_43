@@ -18,7 +18,7 @@ constexpr uint32_t dataRate = ads1015 ? ads1015DataRate : ads1115DataRate;
 constexpr uint32_t conversionPeriodUs = (1000000UL + dataRate - 1) / dataRate;
 constexpr float triggerHysteresisV = 0.03f;
 // REQUIRED calibration: measured mains RMS / reported ADC AC RMS.
-// 0 = uncalibrated. No mains RMS or mains peak is claimed in this mode.
+// 0 = uncalibrated. No mains RMS is claimed in this mode.
 constexpr float mainsVoltsPerAdcVolt = 402.42f;
 // Display-only gain so the signal is visible on the +/-300 V RMS axis.
 constexpr float previewGain = 300.0f;

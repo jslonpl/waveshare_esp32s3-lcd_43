@@ -15,9 +15,9 @@ constexpr size_t kDisplayedPeriods = 3;
 constexpr int kHorizontalDivisions = int(kDisplayedPeriods) * 2;
 // Krzywa jest prezentowana w skali RMS. Dla przebiegu sinusoidalnego kazda
 // wartosc chwilowa jest dzielona przez sqrt(2), wiec typowe 230 V RMS zajmuje
-// na osi tyle samo miejsca co +/-230 V zamiast +/-325 V wartosci szczytowej.
+// na osi tyle samo miejsca co +/-230 V.
 constexpr float kAxisLimitVolts = 300.0f;
-constexpr float kPeakToRmsScale = 0.70710678118f;
+constexpr float kInstantaneousToRmsScale = 0.70710678118f;
 constexpr int kLeft = 80;
 constexpr int kTop = 110;
 constexpr int kWidth = 680;
@@ -34,7 +34,6 @@ struct MetricValue {
     size_t characterCount = 0;
 };
 static MetricValue rmsValue;
-static MetricValue maximumValue;
 static MetricValue frequencyValue;
 static lv_obj_t *status = nullptr;
 static lv_obj_t *timeTicks[kHorizontalDivisions + 1]{};
@@ -109,11 +108,9 @@ inline MetricValue metricValueLabel(
 
 inline void setMetrics(
     const char *rmsText,
-    const char *maximumText,
     const char *frequencyText
 ) {
     setMetricValue(rmsValue, rmsText);
-    setMetricValue(maximumValue, maximumText);
     setMetricValue(frequencyValue, frequencyText);
 }
 
@@ -161,7 +158,6 @@ inline void create() {
     // Opis, stale pola znakow i jednostka sa osobnymi obiektami. Aktualizacja
     // cyfry nie zmienia polozenia pozostalych znakow, opisu ani jednostki.
     rmsValue = metricValueLabel(screen, 24, "U RMS", 136, 85, 5, 228, "V");
-    maximumValue = metricValueLabel(screen, 280, "U max", 388, 85, 5, 480, "V");
     frequencyValue = metricValueLabel(screen, 536, "FREQ", 620, 68, 4, 693, "Hz");
     label(screen, 24, 78, "u RMS [V]");
 
@@ -202,7 +198,6 @@ inline void create() {
 inline void update(
     const float *volts,
     const char *rmsText,
-    const char *maximumText,
     const char *frequencyText,
     const char *statusText
 ) {
@@ -214,7 +209,7 @@ inline void update(
     lv_line_set_points(curve, points, kPointCount);
     lv_obj_clear_flag(curve, LV_OBJ_FLAG_HIDDEN);
     lv_obj_invalidate(curve);
-    setMetrics(rmsText, maximumText, frequencyText);
+    setMetrics(rmsText, frequencyText);
     lv_label_set_text(status, statusText);
 }
 // Call only while holding lvgl_port_lock(). Coordinates are prepared by the
@@ -222,7 +217,6 @@ inline void update(
 inline void updatePrepared(
     const int16_t *preparedY,
     const char *rmsText,
-    const char *maximumText,
     const char *frequencyText,
     const char *statusText,
     float frequencyHz
@@ -234,7 +228,7 @@ inline void updatePrepared(
     lv_line_set_points(curve, points, kPointCount);
     lv_obj_clear_flag(curve, LV_OBJ_FLAG_HIDDEN);
     lv_obj_invalidate(curve);
-    setMetrics(rmsText, maximumText, frequencyText);
+    setMetrics(rmsText, frequencyText);
     lv_label_set_text(status, statusText);
     updateTimeAxis(frequencyHz);
 }
@@ -244,7 +238,7 @@ inline void setStatus(const char *text) {
     lv_label_set_text(status, text);
 }
 inline void hold(const char *text) {
-    setMetrics("--", "--", "--");
+    setMetrics("--", "--");
     lv_label_set_text(status, text);
 }
 } // namespace sine_view

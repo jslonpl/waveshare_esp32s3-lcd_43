@@ -54,7 +54,6 @@ inline bool verifySine(
     return status == waveform::AnalysisStatus::Ok &&
         fabsf(result.frequency - frequency) <= 0.1f &&
         closeRelative(result.rms, amplitude / sqrtf(2.0f), 0.005f) &&
-        closeRelative(result.peak, amplitude, 0.005f) &&
         fabsf(result.offset - offset) <= 0.002f;
 }
 

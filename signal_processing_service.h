@@ -125,7 +125,6 @@ private:
     uint32_t lastPresentationMs_ = 0;
     uint32_t lastPublishedMs_ = 0;
     float smoothRms_ = 0;
-    float smoothPeak_ = 0;
     float smoothFrequency_ = 0;
     uint32_t droppedFrames_ = 0;
     uint32_t skippedFrames_ = 0;
@@ -314,14 +313,11 @@ private:
             : 1.0f - expf(-dtMs / kValuesTauMs);
 
         const float measuredRms = result.rms * gain;
-        const float measuredPeak = result.peak * gain;
         if (resetPresentation) {
             smoothRms_ = measuredRms;
-            smoothPeak_ = measuredPeak;
             smoothFrequency_ = result.frequency;
         } else {
             smoothRms_ += valuesAlpha * (measuredRms - smoothRms_);
-            smoothPeak_ += valuesAlpha * (measuredPeak - smoothPeak_);
             smoothFrequency_ += valuesAlpha * (result.frequency - smoothFrequency_);
         }
 
@@ -344,7 +340,7 @@ private:
                 float(i) * displayWindowUs / kHarmonicFitPointCount;
             const float value =
                 (waveform::at(samples, sampleCount, t, index) -
-                 result.offset) * gain * sine_view::kPeakToRmsScale;
+                 result.offset) * gain * sine_view::kInstantaneousToRmsScale;
 
             for (size_t harmonic = 0; harmonic < kHarmonicCount; ++harmonic) {
                 coefficientCosine[harmonic] +=
@@ -440,7 +436,6 @@ private:
         lastPresentationMs_ = nowMs;
 
         frame.measurement.rms = result.rms;
-        frame.measurement.peak = result.peak;
         frame.measurement.frequency = result.frequency;
         frame.measurement.offset = result.offset;
         frame.measurement.minimum = result.minimum;
@@ -455,12 +450,6 @@ private:
                 sizeof(frame.rms_value_text),
                 "%.1f",
                 smoothRms_
-            );
-            snprintf(
-                frame.maximum_value_text,
-                sizeof(frame.maximum_value_text),
-                "%.1f",
-                smoothPeak_
             );
             snprintf(
                 frame.frequency_value_text,
@@ -478,11 +467,6 @@ private:
             snprintf(
                 frame.rms_value_text,
                 sizeof(frame.rms_value_text),
-                "--"
-            );
-            snprintf(
-                frame.maximum_value_text,
-                sizeof(frame.maximum_value_text),
                 "--"
             );
             snprintf(

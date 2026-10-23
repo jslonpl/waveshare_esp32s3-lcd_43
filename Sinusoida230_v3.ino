@@ -261,11 +261,10 @@ void logDiagnostics(
     if (frame.valid) {
         const auto &m = frame.measurement;
         Serial.printf(
-            "ADC_RMS=%.6f V ADC_PEAK=%.6f V "
+            "ADC_RMS=%.6f V "
             "OFFSET=%.4f V MIN=%.4f V MAX=%.4f V "
             "f=%.3f Hz fs=%.0f quality=0x%08lX\n",
             m.rms,
-            m.peak,
             m.offset,
             m.minimum,
             m.maximum,
@@ -378,7 +377,6 @@ void loop() {
         sine_view::updatePrepared(
             frame->y,
             frame->rms_value_text,
-            frame->maximum_value_text,
             frame->frequency_value_text,
             frame->status_text,
             frame->measurement.frequency

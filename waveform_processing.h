@@ -14,7 +14,7 @@ enum class AnalysisStatus : uint8_t {
     PeriodJitter,
 };
 struct Result {
-    float offset = 0, rms = 0, peak = 0, frequency = 0, sampleRate = 0;
+    float offset = 0, rms = 0, frequency = 0, sampleRate = 0;
     float minimum = 0, maximum = 0;
     float triggerUs = 0;
     float displayEndUs = 0;
@@ -141,12 +141,9 @@ inline AnalysisStatus analyzeDetailed(
     r.displayEndUs=edges[displayPeriods];
     r.sampleRate=float(n-1)*1000000.0f/timeAt(s,n-1);
     r.minimum=r.maximum=s[0].volts;
-    r.peak=0;
     for(size_t i=0;i<n;++i) {
         r.minimum=fminf(r.minimum,s[i].volts);
         r.maximum=fmaxf(r.maximum,s[i].volts);
-        if(timeAt(s,i)>=edges[0] && timeAt(s,i)<=edges[count-1])
-            r.peak=fmaxf(r.peak,fabsf(s[i].volts-r.offset));
     }
     r.nearRail=r.minimum<0.05f || r.maximum>4.95f;
     return AnalysisStatus::Ok;
