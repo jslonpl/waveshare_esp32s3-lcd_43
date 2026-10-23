@@ -36,7 +36,6 @@ struct MetricValue {
 };
 static MetricValue rmsValue;
 static MetricValue frequencyValue;
-static lv_obj_t *status = nullptr;
 static lv_obj_t *timeTicks[kHorizontalDivisions + 1]{};
 static lv_point_t points[kPointCount]; // LVGL zachowuje wskaznik: tablica musi zyc stale.
 static float displayedAxisFrequencyHz = 0.0f;
@@ -204,14 +203,12 @@ inline void create() {
     // tej gestosci punktow nie daje widocznej korzysci na panelu 800x480.
     lv_obj_set_style_line_rounded(curve, true, 0);
     lv_obj_add_flag(curve, LV_OBJ_FLAG_HIDDEN);
-    status = label(screen, 24, 450, "ADC  |  oczekiwanie na pomiar", 0x9CAEBF);
 }
 // Call only while holding lvgl_port_lock(). Updates objects, never recreates axes.
 inline void update(
     const float *volts,
     const char *rmsText,
-    const char *frequencyText,
-    const char *statusText
+    const char *frequencyText
 ) {
     lv_obj_invalidate(curve);
     for (int i=0; i<kPointCount; ++i) {
@@ -222,7 +219,6 @@ inline void update(
     lv_obj_clear_flag(curve, LV_OBJ_FLAG_HIDDEN);
     lv_obj_invalidate(curve);
     setMetrics(rmsText, frequencyText);
-    lv_label_set_text(status, statusText);
 }
 // Call only while holding lvgl_port_lock(). Coordinates are prepared by the
 // processing task, so the LVGL critical section performs only a bounded copy.
@@ -230,7 +226,6 @@ inline void updatePrepared(
     const int16_t *preparedY,
     const char *rmsText,
     const char *frequencyText,
-    const char *statusText,
     float frequencyHz
 ) {
     lv_obj_invalidate(curve);
@@ -241,16 +236,9 @@ inline void updatePrepared(
     lv_obj_clear_flag(curve, LV_OBJ_FLAG_HIDDEN);
     lv_obj_invalidate(curve);
     setMetrics(rmsText, frequencyText);
-    lv_label_set_text(status, statusText);
     updateTimeAxis(frequencyHz);
 }
-// Call only while holding lvgl_port_lock(). Keeps the last valid curve and
-// metric values visible while reporting a transient acquisition problem.
-inline void setStatus(const char *text) {
-    lv_label_set_text(status, text);
-}
-inline void hold(const char *text) {
+inline void hold() {
     setMetrics("--", "--");
-    lv_label_set_text(status, text);
 }
 } // namespace sine_view

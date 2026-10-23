@@ -80,7 +80,6 @@ struct DisplayFrame {
     ProcessingMetrics processing;
     char rms_value_text[16]{};
     char frequency_value_text[16]{};
-    char status_text[120]{};
 };
 
 } // namespace measurement
