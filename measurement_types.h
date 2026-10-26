@@ -26,6 +26,7 @@ struct MeasurementRecord {
     uint32_t sequence = 0;
     uint64_t timestamp_us = 0;
     float rms = 0;
+    float peak = 0;
     float frequency = 0;
     float offset = 0;
     float minimum = 0;
@@ -75,11 +76,14 @@ struct DisplayFrame {
     uint32_t completed_ms = 0;
     bool valid = false;
     int16_t y[kDisplayPointCount]{};
+    int16_t rms_y = 0;
     MeasurementRecord measurement;
     AcquisitionMetrics acquisition;
     ProcessingMetrics processing;
     char rms_value_text[16]{};
+    char maximum_value_text[16]{};
     char frequency_value_text[16]{};
+    char status_text[120]{};
 };
 
 } // namespace measurement

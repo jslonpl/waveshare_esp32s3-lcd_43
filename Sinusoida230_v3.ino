@@ -171,7 +171,22 @@ void setup() {
 void showHold(const char *text) {
     Serial.println(text);
     if (lvgl_port_lock(100)) {
-        sine_view::hold();
+        sine_view::hold(text);
+        lvgl_port_unlock();
+        lvgl_port_request_refresh();
+    }
+}
+
+void showTransientWarning(const char *state) {
+    char text[96];
+    snprintf(
+        text,
+        sizeof(text),
+        "OSTRZEZENIE: %s | ostatni poprawny pomiar",
+        state
+    );
+    if (lvgl_port_lock(100)) {
+        sine_view::setStatus(text);
         lvgl_port_unlock();
         lvgl_port_request_refresh();
     }
@@ -246,10 +261,11 @@ void logDiagnostics(
     if (frame.valid) {
         const auto &m = frame.measurement;
         Serial.printf(
-            "ADC_RMS=%.6f V "
+            "ADC_RMS=%.6f V ADC_PEAK=%.6f V "
             "OFFSET=%.4f V MIN=%.4f V MAX=%.4f V "
             "f=%.3f Hz fs=%.0f quality=0x%08lX\n",
             m.rms,
+            m.peak,
             m.offset,
             m.minimum,
             m.maximum,
@@ -268,6 +284,7 @@ void loop() {
     static uint32_t lvglHoldMaxUs = 0;
     static uint32_t lvglLockFailures = 0;
     static uint32_t activeFault = measurement::kQualityNone;
+    static bool haveValidFrame = false;
     static bool holdVisible = false;
     static QualityCounters qualityCounters;
 
@@ -281,6 +298,7 @@ void loop() {
             incrementSaturating(qualityCounters.missingFrame);
             Serial.println("ADC_FAULT state=MISSING_FRAME");
             logQualityCounters(qualityCounters);
+            if (haveValidFrame) showTransientWarning("MISSING_FRAME");
         }
         if (
             !holdVisible &&
@@ -315,13 +333,16 @@ void loop() {
                 lvglLockFailures
             );
             logQualityCounters(qualityCounters);
+            if (haveValidFrame && !holdVisible) {
+                showTransientWarning(diagnosticState(quality));
+            }
         }
 
         if (
             !holdVisible &&
             uint32_t(nowMs - lastValidMs) >= kHoldAfterNoValidMs
         ) {
-            showHold("HOLD | brak poprawnej ramki pomiarowej");
+            showHold(frame->status_text);
             holdVisible = true;
         }
 
@@ -346,6 +367,7 @@ void loop() {
     }
     activeFault = measurement::kQualityNone;
     holdVisible = false;
+    haveValidFrame = true;
     lastValidMs = nowMs;
 
     const uint32_t lockRequest = micros();
@@ -355,8 +377,11 @@ void loop() {
         if (waitUs > lvglWaitMaxUs) lvglWaitMaxUs = waitUs;
         sine_view::updatePrepared(
             frame->y,
+            frame->rms_y,
             frame->rms_value_text,
+            frame->maximum_value_text,
             frame->frequency_value_text,
+            frame->status_text,
             frame->measurement.frequency
         );
         lvgl_port_unlock();

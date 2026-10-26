@@ -125,6 +125,7 @@ private:
     uint32_t lastPresentationMs_ = 0;
     uint32_t lastPublishedMs_ = 0;
     float smoothRms_ = 0;
+    float smoothPeak_ = 0;
     float smoothFrequency_ = 0;
     uint32_t droppedFrames_ = 0;
     uint32_t skippedFrames_ = 0;
@@ -166,6 +167,20 @@ private:
             default:
                 return measurement::kNoStableTrigger;
         }
+    }
+
+    static const char *holdText(uint32_t quality) {
+        if (quality & measurement::kI2cError)
+            return "HOLD | blad I2C/ADC; szczegoly w monitorze UART";
+        if (quality & measurement::kStaleBlock)
+            return "HOLD | blok ADC nieaktualny";
+        if (quality & measurement::kSampleGap)
+            return "HOLD | opoznienie akwizycji >5 ms; sprawdz ADC_DIAG";
+        if (quality & measurement::kPeriodOutOfRange)
+            return "HOLD | okres poza zakresem 40-80 Hz";
+        if (quality & measurement::kPeriodJitter)
+            return "HOLD | niestabilny okres przebiegu";
+        return "HOLD | brak stabilnego wyzwolenia 40-80 Hz";
     }
 
     static const char *diagnosticState(uint32_t quality) {
@@ -299,18 +314,21 @@ private:
             : 1.0f - expf(-dtMs / kValuesTauMs);
 
         const float measuredRms = result.rms * gain;
+        const float measuredPeak = result.peak * gain;
         if (resetPresentation) {
             smoothRms_ = measuredRms;
+            smoothPeak_ = measuredPeak;
             smoothFrequency_ = result.frequency;
         } else {
             smoothRms_ += valuesAlpha * (measuredRms - smoothRms_);
+            smoothPeak_ += valuesAlpha * (measuredPeak - smoothPeak_);
             smoothFrequency_ += valuesAlpha * (result.frequency - smoothFrequency_);
         }
 
         const uint32_t frameStart = micros();
         size_t index = 0;
         const bool outsideAxis =
-            measuredRms > sine_view::kAxisLimitVolts;
+            result.peak * gain > sine_view::kAxisLimitVolts;
         const float displayWindowUs = result.displayEndUs - result.triggerUs;
 
         float coefficientCosine[kHarmonicCount]{};
@@ -326,7 +344,7 @@ private:
                 float(i) * displayWindowUs / kHarmonicFitPointCount;
             const float value =
                 (waveform::at(samples, sampleCount, t, index) -
-                 result.offset) * gain * sine_view::kInstantaneousToRmsScale;
+                 result.offset) * gain;
 
             for (size_t harmonic = 0; harmonic < kHarmonicCount; ++harmonic) {
                 coefficientCosine[harmonic] +=
@@ -416,12 +434,18 @@ private:
         // Punkt 681 zamyka dokladnie te sama faze co punkt pierwszy.
         displayVolts_[lastPoint] = displayVolts_[0];
         frame.y[lastPoint] = frame.y[0];
+        const float clippedRms = fmaxf(
+            -sine_view::kAxisLimitVolts,
+            fminf(sine_view::kAxisLimitVolts, smoothRms_)
+        );
+        frame.rms_y = static_cast<int16_t>(sine_view::voltageToY(clippedRms));
         frame.processing.frame_prepare_us = uint32_t(micros() - frameStart);
 
         presentationReady_ = true;
         lastPresentationMs_ = nowMs;
 
         frame.measurement.rms = result.rms;
+        frame.measurement.peak = result.peak;
         frame.measurement.frequency = result.frequency;
         frame.measurement.offset = result.offset;
         frame.measurement.minimum = result.minimum;
@@ -434,14 +458,26 @@ private:
             snprintf(
                 frame.rms_value_text,
                 sizeof(frame.rms_value_text),
-                "%.0f",
+                "%.1f",
                 smoothRms_
+            );
+            snprintf(
+                frame.maximum_value_text,
+                sizeof(frame.maximum_value_text),
+                "%.1f",
+                smoothPeak_
             );
             snprintf(
                 frame.frequency_value_text,
                 sizeof(frame.frequency_value_text),
                 "%.1f",
                 smoothFrequency_
+            );
+            snprintf(
+                frame.status_text,
+                sizeof(frame.status_text),
+                "POMIAR | A0 | %.0f probek/s",
+                result.sampleRate
             );
         } else {
             snprintf(
@@ -450,10 +486,36 @@ private:
                 "--"
             );
             snprintf(
+                frame.maximum_value_text,
+                sizeof(frame.maximum_value_text),
+                "--"
+            );
+            snprintf(
                 frame.frequency_value_text,
                 sizeof(frame.frequency_value_text),
                 "%.1f",
                 smoothFrequency_
+            );
+            snprintf(
+                frame.status_text,
+                sizeof(frame.status_text),
+                "BEZ KALIBRACJI | podglad x%.0f | ADC RMS=%.3f V",
+                gain, result.rms
+            );
+        }
+
+        if (result.nearRail) {
+            snprintf(
+                frame.status_text,
+                sizeof(frame.status_text),
+                "UWAGA: OUT blisko 0/5 V | sprawdz wzmocnienie czujnika"
+            );
+        } else if (outsideAxis) {
+            snprintf(
+                frame.status_text,
+                sizeof(frame.status_text),
+                "%s | przebieg poza osia +/-400; obraz przyciety",
+                calibrated ? "POMIAR" : "BEZ KALIBRACJI"
             );
         }
     }
@@ -518,6 +580,13 @@ private:
         frame.valid = quality == measurement::kQualityNone;
         if (frame.valid) {
             prepareValidFrame(block, history_, historyCount_, result, frame);
+        } else {
+            snprintf(
+                frame.status_text,
+                sizeof(frame.status_text),
+                "%s",
+                holdText(quality)
+            );
         }
 
         frame.processing.processing_us = uint32_t(micros() - processingStart);

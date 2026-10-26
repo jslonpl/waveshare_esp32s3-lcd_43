@@ -13,16 +13,11 @@
 namespace sine_view {
 constexpr size_t kDisplayedPeriods = 3;
 constexpr int kHorizontalDivisions = int(kDisplayedPeriods) * 2;
-// Krzywa jest prezentowana w skali RMS. Dla przebiegu sinusoidalnego kazda
-// wartosc chwilowa jest dzielona przez sqrt(2), wiec typowe 230 V RMS zajmuje
-// na osi tyle samo miejsca co +/-230 V.
-constexpr float kAxisLimitVolts = 300.0f;
-constexpr float kInstantaneousToRmsScale = 0.70710678118f;
+constexpr float kAxisLimitVolts = 400.0f;
 constexpr int kLeft = 80;
 constexpr int kTop = 110;
 constexpr int kWidth = 680;
 constexpr int kHeight = 280;
-constexpr int kFrequencyLeft = 546;
 // Jeden punkt na piksel zapobiega widocznej redukcji rozdzielczosci wykresu.
 // Wygladzenie pomiedzy probkami ADC wykonuje zadanie przetwarzania, poza LVGL.
 constexpr int kPointStride = 1;
@@ -35,8 +30,12 @@ struct MetricValue {
     size_t characterCount = 0;
 };
 static MetricValue rmsValue;
+static MetricValue maximumValue;
 static MetricValue frequencyValue;
+static lv_obj_t *status = nullptr;
+static lv_obj_t *rmsLine = nullptr;
 static lv_obj_t *timeTicks[kHorizontalDivisions + 1]{};
+static lv_point_t rmsLinePoints[2];
 static lv_point_t points[kPointCount]; // LVGL zachowuje wskaznik: tablica musi zyc stale.
 static float displayedAxisFrequencyHz = 0.0f;
 
@@ -74,7 +73,6 @@ inline void setMetricValue(MetricValue &value, const char *text) {
 
 inline MetricValue metricValueLabel(
     lv_obj_t *parent,
-    int prefixX,
     const char *prefix,
     int valueX,
     int valueWidth,
@@ -83,12 +81,23 @@ inline MetricValue metricValueLabel(
     const char *unit
 ) {
     constexpr int kMetricsY = 20;
+    const int equalsGap = lv_txt_get_width(
+        " ", 1, &lv_font_montserrat_26, 0, LV_TEXT_FLAG_NONE);
+    const int equalsWidth = lv_txt_get_width(
+        "=", 1, &lv_font_montserrat_26, 0, LV_TEXT_FLAG_NONE);
+    const int prefixWidth = lv_txt_get_width(
+        prefix, std::strlen(prefix), &lv_font_montserrat_26, 0,
+        LV_TEXT_FLAG_NONE);
+    const int equalsX = valueX - equalsGap - equalsWidth;
+    const int prefixX = equalsX - equalsGap - prefixWidth;
     lv_obj_t *prefixLabel = label(parent, prefixX, kMetricsY, prefix);
+    lv_obj_t *equalsLabel = label(parent, equalsX, kMetricsY, "=");
     lv_obj_t *unitLabel = label(parent, unitX, kMetricsY, unit);
     MetricValue value;
     value.characterCount = characterCount;
 
     lv_obj_set_style_text_font(prefixLabel, &lv_font_montserrat_26, 0);
+    lv_obj_set_style_text_font(equalsLabel, &lv_font_montserrat_26, 0);
     lv_obj_set_style_text_font(unitLabel, &lv_font_montserrat_26, 0);
 
     // Kazdy znak ma stale pole. Zmiana szerokosci glifu (np. 1 -> 8) nie
@@ -108,9 +117,11 @@ inline MetricValue metricValueLabel(
 
 inline void setMetrics(
     const char *rmsText,
+    const char *maximumText,
     const char *frequencyText
 ) {
     setMetricValue(rmsValue, rmsText);
+    setMetricValue(maximumValue, maximumText);
     setMetricValue(frequencyValue, frequencyText);
 }
 
@@ -157,23 +168,13 @@ inline void create() {
     char text[110];
     // Opis, stale pola znakow i jednostka sa osobnymi obiektami. Aktualizacja
     // cyfry nie zmienia polozenia pozostalych znakow, opisu ani jednostki.
-    rmsValue = metricValueLabel(
-        screen, kLeft, "U RMS", kLeft + 80, 85, 5, kLeft + 174, "V");
-    //frequencyValue = metricValueLabel(screen, kFrequencyLeft, "FREQ", kFrequencyLeft + 84, 68, 4, 693, "Hz");
-    frequencyValue = metricValueLabel(
-        screen,
-        kFrequencyLeft,       // napis FREQ
-        "FREQ",
-        kFrequencyLeft + 100,  // początek wartości
-        68,                   // szerokość wartości
-        4,                    // liczba znaków
-        kFrequencyLeft + 173, // jednostka Hz
-        "Hz"
-    );
-    label(screen, 24, 78, "u RMS [V]");
+    rmsValue = metricValueLabel(screen, "U RMS", 136, 85, 5, 228, "V");
+    maximumValue = metricValueLabel(screen, "U max", 388, 85, 5, 480, "V");
+    frequencyValue = metricValueLabel(screen, "FREQ", 642, 68, 4, 718, "Hz");
+    label(screen, 24, 78, "u [V]");
 
-    // Siatka 100 V RMS oraz 0,5 okresu. Linie osi sa jasniejsze i grubsze.
-    for (int volts = -300; volts <= 300; volts += 100) {
+    // Siatka 100 V oraz 0,5 okresu. Linie osi sa jasniejsze i grubsze.
+    for (int volts = -400; volts <= 400; volts += 100) {
         const int y = voltageToY(static_cast<float>(volts));
         bar(screen, kLeft, y, kWidth + 1, volts == 0 ? 2 : 1,
             volts == 0 ? 0xCDD9E5 : 0x344351);
@@ -189,6 +190,24 @@ inline void create() {
     label(screen, 704, 430, "t [ms]");
     updateTimeAxis(50.0f, true);
 
+    // Linia aktualnego U RMS lezy pod sinusoida. Dzieki kolejnosci tworzenia
+    // zolta krzywa zachowuje swoj kolor w miejscach przeciecia.
+    const lv_coord_t initialRmsY = static_cast<lv_coord_t>(voltageToY(0));
+    rmsLinePoints[0] = {
+        static_cast<lv_coord_t>(kLeft),
+        initialRmsY
+    };
+    rmsLinePoints[1] = {
+        static_cast<lv_coord_t>(kLeft + kWidth),
+        initialRmsY
+    };
+    rmsLine = lv_line_create(screen);
+    lv_obj_set_pos(rmsLine, 0, 0);
+    lv_line_set_points(rmsLine, rmsLinePoints, 2);
+    lv_obj_set_style_line_color(rmsLine, lv_color_hex(0xC4515D), 0);
+    lv_obj_set_style_line_width(rmsLine, 1, 0);
+    lv_obj_add_flag(rmsLine, LV_OBJ_FLAG_HIDDEN);
+
     // Stable storage for LVGL. Hidden until the first valid acquisition.
     for (int i = 0; i < kPointCount; ++i) {
         points[i].x = static_cast<lv_coord_t>(kLeft + i * kPointStride);
@@ -203,12 +222,15 @@ inline void create() {
     // tej gestosci punktow nie daje widocznej korzysci na panelu 800x480.
     lv_obj_set_style_line_rounded(curve, true, 0);
     lv_obj_add_flag(curve, LV_OBJ_FLAG_HIDDEN);
+    status = label(screen, 24, 450, "ADC  |  oczekiwanie na pomiar", 0x9CAEBF);
 }
 // Call only while holding lvgl_port_lock(). Updates objects, never recreates axes.
 inline void update(
     const float *volts,
     const char *rmsText,
-    const char *frequencyText
+    const char *maximumText,
+    const char *frequencyText,
+    const char *statusText
 ) {
     lv_obj_invalidate(curve);
     for (int i=0; i<kPointCount; ++i) {
@@ -218,16 +240,26 @@ inline void update(
     lv_line_set_points(curve, points, kPointCount);
     lv_obj_clear_flag(curve, LV_OBJ_FLAG_HIDDEN);
     lv_obj_invalidate(curve);
-    setMetrics(rmsText, frequencyText);
+    setMetrics(rmsText, maximumText, frequencyText);
+    lv_label_set_text(status, statusText);
 }
 // Call only while holding lvgl_port_lock(). Coordinates are prepared by the
 // processing task, so the LVGL critical section performs only a bounded copy.
 inline void updatePrepared(
     const int16_t *preparedY,
+    int16_t rmsY,
     const char *rmsText,
+    const char *maximumText,
     const char *frequencyText,
+    const char *statusText,
     float frequencyHz
 ) {
+    lv_obj_invalidate(rmsLine);
+    rmsLinePoints[0].y = static_cast<lv_coord_t>(rmsY);
+    rmsLinePoints[1].y = static_cast<lv_coord_t>(rmsY);
+    lv_line_set_points(rmsLine, rmsLinePoints, 2);
+    lv_obj_clear_flag(rmsLine, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_invalidate(rmsLine);
     lv_obj_invalidate(curve);
     for (int i=0; i<kPointCount; ++i) {
         points[i].y = static_cast<lv_coord_t>(preparedY[i]);
@@ -235,10 +267,17 @@ inline void updatePrepared(
     lv_line_set_points(curve, points, kPointCount);
     lv_obj_clear_flag(curve, LV_OBJ_FLAG_HIDDEN);
     lv_obj_invalidate(curve);
-    setMetrics(rmsText, frequencyText);
+    setMetrics(rmsText, maximumText, frequencyText);
+    lv_label_set_text(status, statusText);
     updateTimeAxis(frequencyHz);
 }
-inline void hold() {
-    setMetrics("--", "--");
+// Call only while holding lvgl_port_lock(). Keeps the last valid curve and
+// metric values visible while reporting a transient acquisition problem.
+inline void setStatus(const char *text) {
+    lv_label_set_text(status, text);
+}
+inline void hold(const char *text) {
+    setMetrics("--", "--", "--");
+    lv_label_set_text(status, text);
 }
 } // namespace sine_view
