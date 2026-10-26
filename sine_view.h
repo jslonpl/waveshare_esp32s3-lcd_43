@@ -71,6 +71,17 @@ inline void setMetricValue(MetricValue &value, const char *text) {
     }
 }
 
+inline int metricPrefixX(const char *prefix, int valueX) {
+    const int equalsGap = lv_txt_get_width(
+        " ", 1, &lv_font_montserrat_26, 0, LV_TEXT_FLAG_NONE);
+    const int equalsWidth = lv_txt_get_width(
+        "=", 1, &lv_font_montserrat_26, 0, LV_TEXT_FLAG_NONE);
+    const int prefixWidth = lv_txt_get_width(
+        prefix, std::strlen(prefix), &lv_font_montserrat_26, 0,
+        LV_TEXT_FLAG_NONE);
+    return valueX - 2 * equalsGap - equalsWidth - prefixWidth;
+}
+
 inline MetricValue metricValueLabel(
     lv_obj_t *parent,
     const char *prefix,
@@ -85,11 +96,8 @@ inline MetricValue metricValueLabel(
         " ", 1, &lv_font_montserrat_26, 0, LV_TEXT_FLAG_NONE);
     const int equalsWidth = lv_txt_get_width(
         "=", 1, &lv_font_montserrat_26, 0, LV_TEXT_FLAG_NONE);
-    const int prefixWidth = lv_txt_get_width(
-        prefix, std::strlen(prefix), &lv_font_montserrat_26, 0,
-        LV_TEXT_FLAG_NONE);
     const int equalsX = valueX - equalsGap - equalsWidth;
-    const int prefixX = equalsX - equalsGap - prefixWidth;
+    const int prefixX = metricPrefixX(prefix, valueX);
     lv_obj_t *prefixLabel = label(parent, prefixX, kMetricsY, prefix);
     lv_obj_t *equalsLabel = label(parent, equalsX, kMetricsY, "=");
     lv_obj_t *unitLabel = label(parent, unitX, kMetricsY, unit);
@@ -168,9 +176,17 @@ inline void create() {
     char text[110];
     // Opis, stale pola znakow i jednostka sa osobnymi obiektami. Aktualizacja
     // cyfry nie zmienia polozenia pozostalych znakow, opisu ani jednostki.
-    rmsValue = metricValueLabel(screen, "U RMS", 136, 85, 5, 228, "V");
-    maximumValue = metricValueLabel(screen, "U max", 388, 85, 5, 480, "V");
-    frequencyValue = metricValueLabel(screen, "FREQ", 642, 68, 4, 718, "Hz");
+    constexpr int kAxisLabelX = 24;
+    const int headerOffsetX = kAxisLabelX - metricPrefixX("U RMS", 136);
+    rmsValue = metricValueLabel(
+        screen, "U RMS", 136 + headerOffsetX, 85, 5,
+        228 + headerOffsetX, "V");
+    maximumValue = metricValueLabel(
+        screen, "U max", 388 + headerOffsetX, 85, 5,
+        480 + headerOffsetX, "V");
+    frequencyValue = metricValueLabel(
+        screen, "FREQ", 642 + headerOffsetX, 68, 4,
+        718 + headerOffsetX, "Hz");
     label(screen, 24, 78, "u [V]");
 
     // Siatka 100 V oraz 0,5 okresu. Linie osi sa jasniejsze i grubsze.
