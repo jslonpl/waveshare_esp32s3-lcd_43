@@ -34,10 +34,14 @@ static MetricValue maximumValue;
 static MetricValue frequencyValue;
 static lv_obj_t *status = nullptr;
 static lv_obj_t *rmsLine = nullptr;
+static lv_obj_t *rmsTag = nullptr;
 static lv_obj_t *timeTicks[kHorizontalDivisions + 1]{};
 static lv_point_t rmsLinePoints[2];
 static lv_point_t points[kPointCount]; // LVGL zachowuje wskaznik: tablica musi zyc stale.
 static float displayedAxisFrequencyHz = 0.0f;
+constexpr int kRmsTagWidth = 64;
+constexpr int kRmsTagHeight = 26;
+constexpr int kRmsTagX = kLeft + kWidth - kRmsTagWidth;
 
 inline int voltageToY(float volts) {
     return kTop + static_cast<int>(std::lround(
@@ -214,7 +218,7 @@ inline void create() {
         initialRmsY
     };
     rmsLinePoints[1] = {
-        static_cast<lv_coord_t>(kLeft + kWidth),
+        static_cast<lv_coord_t>(kRmsTagX),
         initialRmsY
     };
     rmsLine = lv_line_create(screen);
@@ -238,6 +242,30 @@ inline void create() {
     // tej gestosci punktow nie daje widocznej korzysci na panelu 800x480.
     lv_obj_set_style_line_rounded(curve, true, 0);
     lv_obj_add_flag(curve, LV_OBJ_FLAG_HIDDEN);
+
+    // Etykieta zamyka prawy koniec linii U RMS i porusza sie razem z nia.
+    // Obiekt powstaje tylko raz; kolejne klatki zmieniaja jedynie jego Y.
+    rmsTag = lv_obj_create(screen);
+    lv_obj_remove_style_all(rmsTag);
+    lv_obj_set_pos(
+        rmsTag,
+        kRmsTagX,
+        static_cast<int>(initialRmsY) - kRmsTagHeight / 2
+    );
+    lv_obj_set_size(rmsTag, kRmsTagWidth, kRmsTagHeight);
+    lv_obj_set_style_bg_color(rmsTag, lv_color_hex(0xC4515D), 0);
+    lv_obj_set_style_bg_opa(rmsTag, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(rmsTag, 0, 0);
+    lv_obj_set_style_radius(rmsTag, 0, 0);
+    lv_obj_clear_flag(rmsTag, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *rmsTagLabel = lv_label_create(rmsTag);
+    lv_label_set_text(rmsTagLabel, "U RMS");
+    lv_obj_set_style_text_font(rmsTagLabel, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(rmsTagLabel, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_center(rmsTagLabel);
+    lv_obj_add_flag(rmsTag, LV_OBJ_FLAG_HIDDEN);
+
     status = label(screen, 24, 450, "ADC  |  oczekiwanie na pomiar", 0x9CAEBF);
 }
 // Call only while holding lvgl_port_lock(). Updates objects, never recreates axes.
@@ -276,6 +304,8 @@ inline void updatePrepared(
     lv_line_set_points(rmsLine, rmsLinePoints, 2);
     lv_obj_clear_flag(rmsLine, LV_OBJ_FLAG_HIDDEN);
     lv_obj_invalidate(rmsLine);
+    lv_obj_set_y(rmsTag, static_cast<int>(rmsY) - kRmsTagHeight / 2);
+    lv_obj_clear_flag(rmsTag, LV_OBJ_FLAG_HIDDEN);
     lv_obj_invalidate(curve);
     for (int i=0; i<kPointCount; ++i) {
         points[i].y = static_cast<lv_coord_t>(preparedY[i]);
