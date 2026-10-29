@@ -219,7 +219,7 @@ inline void create() {
     frequencyValue = metricValueLabel(
         screen, "FREQ", thirdColumnX,
         kHeaderWidth - 2 * kHeaderColumnWidth, 68, 4,
-        "Hz", &lv_font_montserrat_16);
+        "Hz", &lv_font_montserrat_26);
     label(screen, 24, 78 + kGraphOffsetY, "u [V]");
 
     // Siatka 100 V oraz 0,5 okresu. Linie osi sa jasniejsze i grubsze.
