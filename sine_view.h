@@ -14,8 +14,11 @@ namespace sine_view {
 constexpr size_t kDisplayedPeriods = 3;
 constexpr int kHorizontalDivisions = int(kDisplayedPeriods) * 2;
 constexpr float kAxisLimitVolts = 400.0f;
+constexpr int kScreenHeight = 480;
+constexpr int kOuterMargin = 12;
+constexpr int kGraphOffsetY = 22;
 constexpr int kLeft = 80;
-constexpr int kTop = 110;
+constexpr int kTop = 110 + kGraphOffsetY;
 constexpr int kWidth = 680;
 constexpr int kHeight = 280;
 // Jeden punkt na piksel zapobiega widocznej redukcji rozdzielczosci wykresu.
@@ -23,6 +26,17 @@ constexpr int kHeight = 280;
 constexpr int kPointStride = 1;
 constexpr int kPointCount = kWidth / kPointStride + 1;
 static_assert(kWidth % kPointStride == 0, "Curve width must match point stride");
+constexpr int kHeaderX = 24;
+constexpr int kHeaderY = 4;
+constexpr int kHeaderWidth = 736;
+constexpr int kHeaderHeight = 80;
+constexpr int kHeaderColumnWidth = 245;
+// Montserrat 26 ma dla wielkich liter i cyfr glif wysokosci 18 px,
+// przesuniety o 6 px wzgledem gornej krawedzi etykiety. Te pozycje daja
+// wizualnie 14 px nad tytulem, 15 px miedzy tytulem i wartoscia oraz 14 px
+// pod cyframi (do kolorowej dolnej krawedzi panelu).
+constexpr int kHeaderTitleY = 12;
+constexpr int kHeaderValueY = 44;
 static lv_obj_t *curve = nullptr;
 constexpr size_t kMetricCharacterCount = 5;
 struct MetricValue {
@@ -74,49 +88,42 @@ inline void setMetricValue(MetricValue &value, const char *text) {
     }
 }
 
-inline int metricPrefixX(const char *prefix, int valueX) {
-    const int equalsGap = lv_txt_get_width(
-        " ", 1, &lv_font_montserrat_26, 0, LV_TEXT_FLAG_NONE);
-    const int equalsWidth = lv_txt_get_width(
-        "=", 1, &lv_font_montserrat_26, 0, LV_TEXT_FLAG_NONE);
-    const int prefixWidth = lv_txt_get_width(
-        prefix, std::strlen(prefix), &lv_font_montserrat_26, 0,
-        LV_TEXT_FLAG_NONE);
-    return valueX - 2 * equalsGap - equalsWidth - prefixWidth;
-}
-
 inline MetricValue metricValueLabel(
     lv_obj_t *parent,
-    const char *prefix,
-    int valueX,
+    const char *title,
+    int columnX,
+    int columnWidth,
     int valueWidth,
     size_t characterCount,
-    int unitX,
-    const char *unit
+    const char *unit,
+    const lv_font_t *unitFont
 ) {
-    constexpr int kMetricsY = 20;
-    const int equalsGap = lv_txt_get_width(
-        " ", 1, &lv_font_montserrat_26, 0, LV_TEXT_FLAG_NONE);
-    const int equalsWidth = lv_txt_get_width(
-        "=", 1, &lv_font_montserrat_26, 0, LV_TEXT_FLAG_NONE);
-    const int equalsX = valueX - equalsGap - equalsWidth;
-    const int prefixX = metricPrefixX(prefix, valueX);
-    lv_obj_t *prefixLabel = label(parent, prefixX, kMetricsY, prefix);
-    lv_obj_t *equalsLabel = label(parent, equalsX, kMetricsY, "=");
-    lv_obj_t *unitLabel = label(parent, unitX, kMetricsY, unit);
+    constexpr int kUnitGap = 6;
+    const int unitWidth = lv_txt_get_width(
+        unit, std::strlen(unit), unitFont, 0,
+        LV_TEXT_FLAG_NONE);
+    const int groupWidth = valueWidth + kUnitGap + unitWidth;
+    const int valueX = columnX + (columnWidth - groupWidth) / 2;
+    const int unitX = valueX + valueWidth + kUnitGap;
+    const int unitY = kHeaderValueY +
+        (lv_font_montserrat_26.line_height - unitFont->line_height) / 2;
+    lv_obj_t *titleLabel = label(
+        parent, columnX + 14, kHeaderTitleY, title, 0x9CAEBF);
+    lv_obj_t *unitLabel = label(
+        parent, unitX, unitY, unit, 0x9CAEBF);
     MetricValue value;
     value.characterCount = characterCount;
 
-    lv_obj_set_style_text_font(prefixLabel, &lv_font_montserrat_26, 0);
-    lv_obj_set_style_text_font(equalsLabel, &lv_font_montserrat_26, 0);
-    lv_obj_set_style_text_font(unitLabel, &lv_font_montserrat_26, 0);
+    lv_obj_set_style_text_font(titleLabel, &lv_font_montserrat_26, 0);
+    lv_obj_set_style_text_font(unitLabel, unitFont, 0);
 
     // Kazdy znak ma stale pole. Zmiana szerokosci glifu (np. 1 -> 8) nie
     // przesuwa pozostalych cyfr ani separatora dziesietnego.
     for (size_t i = 0; i < value.characterCount; ++i) {
         const int left = valueX + int(i) * valueWidth / int(value.characterCount);
         const int right = valueX + int(i + 1) * valueWidth / int(value.characterCount);
-        value.characters[i] = label(parent, left, kMetricsY, " ");
+        value.characters[i] = label(
+            parent, left, kHeaderValueY, " ", 0xF4F7FA);
         lv_obj_set_width(value.characters[i], right - left);
         lv_label_set_long_mode(value.characters[i], LV_LABEL_LONG_CLIP);
         lv_obj_set_style_text_font(value.characters[i], &lv_font_montserrat_26, 0);
@@ -177,20 +184,43 @@ inline void create() {
     lv_obj_set_style_pad_all(screen, 0, 0);
 
     char text[110];
+    // Jeden panel porzadkuje pomiary w trzy stale kolumny. Caly wykres wraz
+    // z etykietami jest przesuniety w dol o wspolny, staly offset.
+    lv_obj_t *header = lv_obj_create(screen);
+    lv_obj_remove_style_all(header);
+    lv_obj_set_pos(header, kHeaderX, kHeaderY);
+    lv_obj_set_size(header, kHeaderWidth, kHeaderHeight);
+    lv_obj_set_style_bg_color(header, lv_color_hex(0x17232E), 0);
+    lv_obj_set_style_bg_opa(header, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(header, lv_color_hex(0x344351), 0);
+    lv_obj_set_style_border_width(header, 1, 0);
+    lv_obj_set_style_radius(header, 6, 0);
+    lv_obj_clear_flag(header, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+
+    const int secondColumnX = kHeaderX + kHeaderColumnWidth;
+    const int thirdColumnX = secondColumnX + kHeaderColumnWidth;
+    bar(screen, secondColumnX, kHeaderY + 8, 1, kHeaderHeight - 16, 0x344351);
+    bar(screen, thirdColumnX, kHeaderY + 8, 1, kHeaderHeight - 16, 0x344351);
+    bar(screen, kHeaderX + 1, kHeaderY + kHeaderHeight - 3,
+        kHeaderColumnWidth - 2, 2, 0xC4515D);
+    bar(screen, secondColumnX + 1, kHeaderY + kHeaderHeight - 3,
+        kHeaderColumnWidth - 2, 2, 0xFFD700);
+    bar(screen, thirdColumnX + 1, kHeaderY + kHeaderHeight - 3,
+        kHeaderWidth - 2 * kHeaderColumnWidth - 2, 2, 0x58B7C6);
+
     // Opis, stale pola znakow i jednostka sa osobnymi obiektami. Aktualizacja
     // cyfry nie zmienia polozenia pozostalych znakow, opisu ani jednostki.
-    constexpr int kAxisLabelX = 24;
-    const int headerOffsetX = kAxisLabelX - metricPrefixX("U RMS", 136);
     rmsValue = metricValueLabel(
-        screen, "U RMS", 136 + headerOffsetX, 85, 5,
-        228 + headerOffsetX, "V");
+        screen, "U RMS", kHeaderX, kHeaderColumnWidth, 85, 5,
+        "V", &lv_font_montserrat_26);
     maximumValue = metricValueLabel(
-        screen, "U max", 388 + headerOffsetX, 85, 5,
-        480 + headerOffsetX, "V");
+        screen, "U max", secondColumnX, kHeaderColumnWidth, 85, 5,
+        "V", &lv_font_montserrat_26);
     frequencyValue = metricValueLabel(
-        screen, "FREQ", 642 + headerOffsetX, 68, 4,
-        718 + headerOffsetX, "Hz");
-    label(screen, 24, 78, "u [V]");
+        screen, "FREQ", thirdColumnX,
+        kHeaderWidth - 2 * kHeaderColumnWidth, 68, 4,
+        "Hz", &lv_font_montserrat_16);
+    label(screen, 24, 78 + kGraphOffsetY, "u [V]");
 
     // Siatka 100 V oraz 0,5 okresu. Linie osi sa jasniejsze i grubsze.
     for (int volts = -400; volts <= 400; volts += 100) {
@@ -206,7 +236,9 @@ inline void create() {
             tick == 0 ? 0xCDD9E5 : 0x344351);
         timeTicks[tick] = label(screen, x - 16, kTop + kHeight + 12, "--");
     }
-    label(screen, 704, 430, "t [ms]");
+    const int timeAxisLabelY =
+        kScreenHeight - kOuterMargin - lv_font_montserrat_16.line_height;
+    label(screen, 704, timeAxisLabelY, "t [ms]");
     updateTimeAxis(50.0f, true);
 
     // Linia aktualnego U RMS lezy pod sinusoida. Dzieki kolejnosci tworzenia
