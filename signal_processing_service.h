@@ -169,20 +169,6 @@ private:
         }
     }
 
-    static const char *holdText(uint32_t quality) {
-        if (quality & measurement::kI2cError)
-            return "HOLD | blad I2C/ADC; szczegoly w monitorze UART";
-        if (quality & measurement::kStaleBlock)
-            return "HOLD | blok ADC nieaktualny";
-        if (quality & measurement::kSampleGap)
-            return "HOLD | opoznienie akwizycji >5 ms; sprawdz ADC_DIAG";
-        if (quality & measurement::kPeriodOutOfRange)
-            return "HOLD | okres poza zakresem 40-80 Hz";
-        if (quality & measurement::kPeriodJitter)
-            return "HOLD | niestabilny okres przebiegu";
-        return "HOLD | brak stabilnego wyzwolenia 40-80 Hz";
-    }
-
     static const char *diagnosticState(uint32_t quality) {
         if (quality & measurement::kI2cError) return "I2C_ERROR";
         if (quality & measurement::kStaleBlock) return "STALE";
@@ -473,12 +459,6 @@ private:
                 "%.1f",
                 smoothFrequency_
             );
-            snprintf(
-                frame.status_text,
-                sizeof(frame.status_text),
-                "POMIAR | A0 | %.0f probek/s",
-                result.sampleRate
-            );
         } else {
             snprintf(
                 frame.rms_value_text,
@@ -495,27 +475,6 @@ private:
                 sizeof(frame.frequency_value_text),
                 "%.1f",
                 smoothFrequency_
-            );
-            snprintf(
-                frame.status_text,
-                sizeof(frame.status_text),
-                "BEZ KALIBRACJI | podglad x%.0f | ADC RMS=%.3f V",
-                gain, result.rms
-            );
-        }
-
-        if (result.nearRail) {
-            snprintf(
-                frame.status_text,
-                sizeof(frame.status_text),
-                "UWAGA: OUT blisko 0/5 V | sprawdz wzmocnienie czujnika"
-            );
-        } else if (outsideAxis) {
-            snprintf(
-                frame.status_text,
-                sizeof(frame.status_text),
-                "%s | przebieg poza osia +/-400; obraz przyciety",
-                calibrated ? "POMIAR" : "BEZ KALIBRACJI"
             );
         }
     }
@@ -580,13 +539,6 @@ private:
         frame.valid = quality == measurement::kQualityNone;
         if (frame.valid) {
             prepareValidFrame(block, history_, historyCount_, result, frame);
-        } else {
-            snprintf(
-                frame.status_text,
-                sizeof(frame.status_text),
-                "%s",
-                holdText(quality)
-            );
         }
 
         frame.processing.processing_us = uint32_t(micros() - processingStart);
