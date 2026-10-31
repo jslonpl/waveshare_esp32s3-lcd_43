@@ -194,7 +194,8 @@ void logDiagnostics(
         "result=%lu us wait=%lu us block=%lu us "
         "dropped=%lu stack=%lu B error=%s "
         "mean_gap=%lu us hist_mean=%lu us "
-        "missed=%lu adc_q=%lu adc_errors=%lu "
+        "events=%lu missed=%lu dup_ts=%lu nonmono_ts=%lu "
+        "adc_q=%lu adc_errors=%lu "
         "processing=%lu us frame=%lu us proc_stack=%lu B "
         "frame_dropped=%lu frame_skipped=%lu frame_q=%lu "
         "lvgl_wait_max=%lu us lvgl_hold_max=%lu us lvgl_fail=%lu\n",
@@ -220,7 +221,10 @@ void logDiagnostics(
         esp_err_to_name(static_cast<esp_err_t>(a.error)),
         (unsigned long)a.gap_mean_us,
         (unsigned long)a.history_gap_mean_us,
+        (unsigned long)a.cadence_events,
         (unsigned long)a.missed_conversions,
+        (unsigned long)a.duplicate_timestamps,
+        (unsigned long)a.non_monotonic_timestamps,
         (unsigned long)a.ready_high_water,
         (unsigned long)a.error_count,
         (unsigned long)p.processing_us,

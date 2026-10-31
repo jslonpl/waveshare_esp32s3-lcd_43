@@ -32,7 +32,10 @@ struct Diagnostics {
     uint32_t gapCount = 0;
     uint32_t readyHighWater = 0;
     uint32_t errorCount = 0;
+    uint32_t cadenceEvents = 0;
     uint32_t missedConversions = 0;
+    uint32_t duplicateTimestamps = 0;
+    uint32_t nonMonotonicTimestamps = 0;
 
     void add(const AdcReadTiming &timing) {
         if (timing.totalUs > readMaxUs) {
@@ -50,6 +53,7 @@ struct Diagnostics {
         if (timing.waitUs > waitMaxUs) {
             waitMaxUs = timing.waitUs;
         }
+        cadenceEvents += timing.notifications;
         if (timing.notifications > 1) {
             missedConversions += timing.notifications - 1;
         }
@@ -240,6 +244,12 @@ private:
                         sample.us -
                         block->samples[block->count - 1].us
                     );
+
+                    if (gap == 0) {
+                        ++block->diagnostic.duplicateTimestamps;
+                    } else if (gap > INT32_MAX) {
+                        ++block->diagnostic.nonMonotonicTimestamps;
+                    }
 
                     if (gap > block->diagnostic.gapMaxUs) {
                         block->diagnostic.gapMaxUs = gap;

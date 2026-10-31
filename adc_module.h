@@ -3,6 +3,7 @@
 #include <driver/i2c.h>
 #include <esp_err.h>
 #include <esp_timer.h>
+#include <freertos/queue.h>
 #include "adc_config.h"
 
 struct AdcReadTiming {
@@ -16,12 +17,29 @@ class AdcModule {
 public:
     esp_err_t lastError() const { return error_; }
     const AdcReadTiming &timing() const { return timing_; }
-    void synchronize() {
-        while (ulTaskNotifyTake(pdTRUE, 0) != 0) {}
-    }
     bool begin() {
-        task_ = xTaskGetCurrentTaskHandle();
         error_ = ESP_OK;
+
+        if (cadenceQueue_ == nullptr) {
+            cadenceQueue_ = xQueueCreateStatic(
+                1,
+                sizeof(CadenceEvent),
+                cadenceQueueBuffer_,
+                &cadenceQueueStorage_
+            );
+            if (cadenceQueue_ == nullptr) {
+                error_ = ESP_ERR_NO_MEM;
+                return false;
+            }
+        }
+
+        if (timer_ != nullptr) {
+            const esp_err_t stopped = esp_timer_stop(timer_);
+            if (stopped != ESP_OK && stopped != ESP_ERR_INVALID_STATE) {
+                error_ = stopped;
+                return false;
+            }
+        }
 
         uint16_t detectedConfig;
         if (!readRegister(1, detectedConfig)) return false;
@@ -42,16 +60,10 @@ public:
             };
             error_ = esp_timer_create(&args, &timer_);
             if (error_ != ESP_OK) return false;
-        } else {
-            const esp_err_t stopped = esp_timer_stop(timer_);
-            if (stopped != ESP_OK && stopped != ESP_ERR_INVALID_STATE) {
-                error_ = stopped;
-                return false;
-            }
         }
 
-        synchronize();
-        notificationUs_ = micros();
+        xQueueReset(cadenceQueue_);
+        lastReadSequence_ = cadenceSequence_;
         error_ = esp_timer_start_periodic(
             timer_,
             adc_config::conversionPeriodUs
@@ -68,16 +80,30 @@ public:
             ~Finish() { timing.totalUs=uint32_t(micros()-start); }
         } finish{callStart,timing_};
         const uint32_t waitStart=micros();
-        const uint32_t notifications = ulTaskNotifyTake(pdTRUE, timeoutTicks());
+        CadenceEvent event{};
+        const bool cadenceReady = xQueueReceive(
+            cadenceQueue_,
+            &event,
+            timeoutTicks()
+        ) == pdTRUE;
         timing_.waitUs=uint32_t(micros()-waitStart);
-        timing_.notifications=notifications;
-        if(notifications==0) { error_=ESP_ERR_TIMEOUT; return false; }
+        if(!cadenceReady) { error_=ESP_ERR_TIMEOUT; return false; }
+
+        // The queue contains one coherent {timestamp, sequence} snapshot.
+        // If the ADC task was delayed, the timer overwrites the stale event
+        // with the newest one and the sequence delta exposes skipped periods.
+        // This prevents a newer callback from overwriting the timestamp after
+        // the wake-up has already been consumed.
+        timing_.notifications = uint32_t(
+            event.sequence - lastReadSequence_
+        );
+        lastReadSequence_ = event.sequence;
 
         // A long I2C transaction can span more than one ADC period. The
         // conversion register then contains the newest complete sample. Keep
         // it, preserve the newest timestamp, and expose the skipped periods in
         // diagnostics instead of turning a recoverable overrun into an error.
-        const uint32_t conversionEndUs=notificationUs_;
+        const uint32_t conversionEndUs=event.timeUs;
         timeUs=conversionEndUs-adc_config::conversionPeriodUs/2;
         uint16_t raw;
         const uint32_t t=micros();
@@ -90,16 +116,28 @@ public:
         return true;
     }
 private:
+    struct CadenceEvent {
+        uint32_t timeUs;
+        uint32_t sequence;
+    };
+
     esp_err_t error_=ESP_OK;
     AdcReadTiming timing_;
-    TaskHandle_t task_=nullptr;
     esp_timer_handle_t timer_=nullptr;
-    volatile uint32_t notificationUs_=0;
+    QueueHandle_t cadenceQueue_=nullptr;
+    StaticQueue_t cadenceQueueStorage_{};
+    uint8_t cadenceQueueBuffer_[sizeof(CadenceEvent)]{};
+    uint32_t cadenceSequence_=0;
+    uint32_t lastReadSequence_=0;
 
     static void timerCallback(void *context) {
         auto *self=static_cast<AdcModule *>(context);
-        self->notificationUs_=micros();
-        if(self->task_!=nullptr) xTaskNotifyGive(self->task_);
+        if(self->cadenceQueue_==nullptr) return;
+        const CadenceEvent event = {
+            micros(),
+            ++self->cadenceSequence_
+        };
+        xQueueOverwrite(self->cadenceQueue_, &event);
     }
     static TickType_t timeoutTicks() {
         const TickType_t ticks=pdMS_TO_TICKS(25);

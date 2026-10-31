@@ -58,7 +58,10 @@ struct AcquisitionMetrics {
     uint32_t ready_high_water = 0;
     uint32_t stack_free_bytes = 0;
     uint32_t error_count = 0;
+    uint32_t cadence_events = 0;
     uint32_t missed_conversions = 0;
+    uint32_t duplicate_timestamps = 0;
+    uint32_t non_monotonic_timestamps = 0;
     int32_t error = 0;
 };
 

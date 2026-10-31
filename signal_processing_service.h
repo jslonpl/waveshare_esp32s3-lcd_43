@@ -218,7 +218,10 @@ private:
         out.ready_high_water = d.readyHighWater;
         out.stack_free_bytes = d.stackFreeBytes;
         out.error_count = d.errorCount;
+        out.cadence_events = d.cadenceEvents;
         out.missed_conversions = d.missedConversions;
+        out.duplicate_timestamps = d.duplicateTimestamps;
+        out.non_monotonic_timestamps = d.nonMonotonicTimestamps;
         out.error = static_cast<int32_t>(block.error);
     }
 
