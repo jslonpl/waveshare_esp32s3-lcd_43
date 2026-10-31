@@ -14,6 +14,7 @@ namespace sine_view {
 constexpr size_t kDisplayedPeriods = 3;
 constexpr int kHorizontalDivisions = int(kDisplayedPeriods) * 2;
 constexpr float kAxisLimitVolts = 400.0f;
+constexpr int kScreenWidth = 800;
 constexpr int kScreenHeight = 480;
 constexpr int kOuterMargin = 12;
 constexpr int kGraphOffsetY = 22;
@@ -26,11 +27,13 @@ constexpr int kHeight = 280;
 constexpr int kPointStride = 1;
 constexpr int kPointCount = kWidth / kPointStride + 1;
 static_assert(kWidth % kPointStride == 0, "Curve width must match point stride");
-constexpr int kHeaderX = 24;
+constexpr int kHeaderColumnWidth = 250;
+constexpr int kHeaderWidth = 3 * kHeaderColumnWidth;
+constexpr int kHeaderX = (kScreenWidth - kHeaderWidth) / 2;
 constexpr int kHeaderY = 4;
-constexpr int kHeaderWidth = 736;
 constexpr int kHeaderHeight = 80;
-constexpr int kHeaderColumnWidth = 245;
+static_assert(kHeaderX == kScreenWidth - kHeaderX - kHeaderWidth,
+              "Header margins must be equal");
 // Montserrat 26 ma dla wielkich liter i cyfr glif wysokosci 18 px,
 // przesuniety o 6 px wzgledem gornej krawedzi etykiety. Te pozycje daja
 // wizualnie 14 px nad tytulem, 15 px miedzy tytulem i wartoscia oraz 14 px
