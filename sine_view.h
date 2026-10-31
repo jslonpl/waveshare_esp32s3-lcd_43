@@ -45,6 +45,7 @@ constexpr size_t kMetricCharacterCount = 5;
 struct MetricValue {
     lv_obj_t *characters[kMetricCharacterCount]{};
     size_t characterCount = 0;
+    char text[16]{};
 };
 static MetricValue rmsValue;
 static MetricValue maximumValue;
@@ -75,6 +76,9 @@ inline lv_obj_t *label(lv_obj_t *parent, int x, int y, const char *text,
 }
 
 inline void setMetricValue(MetricValue &value, const char *text) {
+    if (std::strcmp(value.text, text) == 0) return;
+    std::snprintf(value.text, sizeof(value.text), "%s", text);
+
     const size_t textLength = std::strlen(text);
     const size_t visibleLength = textLength < value.characterCount
         ? textLength
@@ -274,7 +278,7 @@ inline void create() {
     lv_obj_set_style_line_width(curve, 3, 0);
     // Zaokraglanie kazdego z setek polaczen jest kosztowne programowo, a przy
     // tej gestosci punktow nie daje widocznej korzysci na panelu 800x480.
-    lv_obj_set_style_line_rounded(curve, true, 0);
+    lv_obj_set_style_line_rounded(curve, false, 0);
     lv_obj_add_flag(curve, LV_OBJ_FLAG_HIDDEN);
 
     // Etykieta zamyka prawy koniec linii U RMS i porusza sie razem z nia.
@@ -327,21 +331,17 @@ inline void updatePrepared(
     const char *frequencyText,
     float frequencyHz
 ) {
-    lv_obj_invalidate(rmsLine);
     rmsLinePoints[0].y = static_cast<lv_coord_t>(rmsY);
     rmsLinePoints[1].y = static_cast<lv_coord_t>(rmsY);
     lv_line_set_points(rmsLine, rmsLinePoints, 2);
     lv_obj_clear_flag(rmsLine, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_invalidate(rmsLine);
     lv_obj_set_y(rmsTag, static_cast<int>(rmsY) - kRmsTagHeight / 2);
     lv_obj_clear_flag(rmsTag, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_invalidate(curve);
-    for (int i=0; i<kPointCount; ++i) {
+    for (int i = 0; i < kPointCount; ++i) {
         points[i].y = static_cast<lv_coord_t>(preparedY[i]);
     }
     lv_line_set_points(curve, points, kPointCount);
     lv_obj_clear_flag(curve, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_invalidate(curve);
     setMetrics(rmsText, maximumText, frequencyText);
     updateTimeAxis(frequencyHz);
 }

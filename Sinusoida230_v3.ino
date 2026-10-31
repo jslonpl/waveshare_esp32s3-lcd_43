@@ -7,6 +7,7 @@
 #include <Arduino.h>
 #include <esp_display_panel.hpp>
 #include <lvgl.h>
+#include <cstring>
 
 #include "lvgl_v8_port.h"
 #include "sine_view.h"
@@ -41,6 +42,115 @@ struct QualityCounters {
     uint32_t periodJitter = 0;
     uint32_t missingFrame = 0;
 };
+
+struct LatencyMaximum {
+    uint32_t cumulative_us = 0;
+    uint32_t interval_us = 0;
+
+    void observe(uint32_t value) {
+        if (value > cumulative_us) cumulative_us = value;
+        if (value > interval_us) interval_us = value;
+    }
+
+    void resetInterval() { interval_us = 0; }
+};
+
+struct GuiMetrics {
+    LatencyMaximum mutex_wait;
+    LatencyMaximum update_prepared;
+    LatencyMaximum mutex_hold;
+    uint32_t publish_attempts = 0;
+    uint32_t updates = 0;
+    uint32_t coalesced = 0;
+    uint32_t mutex_busy = 0;
+    uint32_t failures = 0;
+
+    void resetInterval() {
+        mutex_wait.resetInterval();
+        update_prepared.resetInterval();
+        mutex_hold.resetInterval();
+    }
+};
+
+// Diagnostyka nie przechowuje tablicy punktow. Pozwala zwolnic DisplayFrame
+// przed formatowaniem i wysylaniem kosztownego logu UART.
+struct FrameDiagnostics {
+    uint32_t sequence = 0;
+    bool valid = false;
+    measurement::MeasurementRecord measurement;
+    measurement::AcquisitionMetrics acquisition;
+    measurement::ProcessingMetrics processing;
+};
+
+FrameDiagnostics captureDiagnostics(const measurement::DisplayFrame &frame) {
+    FrameDiagnostics result;
+    result.sequence = frame.sequence;
+    result.valid = frame.valid;
+    result.measurement = frame.measurement;
+    result.acquisition = frame.acquisition;
+    result.processing = frame.processing;
+    return result;
+}
+
+void copyGuiSnapshot(
+    const measurement::DisplayFrame &frame,
+    measurement::GuiSnapshot &snapshot
+) {
+    snapshot.sequence = frame.sequence;
+    std::memcpy(snapshot.y, frame.y, sizeof(snapshot.y));
+    snapshot.rms_y = frame.rms_y;
+    std::memcpy(
+        snapshot.rms_value_text,
+        frame.rms_value_text,
+        sizeof(snapshot.rms_value_text)
+    );
+    std::memcpy(
+        snapshot.maximum_value_text,
+        frame.maximum_value_text,
+        sizeof(snapshot.maximum_value_text)
+    );
+    std::memcpy(
+        snapshot.frequency_value_text,
+        frame.frequency_value_text,
+        sizeof(snapshot.frequency_value_text)
+    );
+    snapshot.frequency = frame.measurement.frequency;
+}
+
+void publishPendingGui(
+    const measurement::GuiSnapshot &snapshot,
+    bool &pending,
+    GuiMetrics &metrics
+) {
+    if (!pending) return;
+
+    ++metrics.publish_attempts;
+    const uint32_t request_us = micros();
+    if (!lvgl_port_lock(0)) {
+        metrics.mutex_wait.observe(uint32_t(micros() - request_us));
+        ++metrics.mutex_busy;
+        return;
+    }
+
+    const uint32_t lock_start_us = micros();
+    metrics.mutex_wait.observe(uint32_t(lock_start_us - request_us));
+    const uint32_t update_start_us = micros();
+    sine_view::updatePrepared(
+        snapshot.y,
+        snapshot.rms_y,
+        snapshot.rms_value_text,
+        snapshot.maximum_value_text,
+        snapshot.frequency_value_text,
+        snapshot.frequency
+    );
+    metrics.update_prepared.observe(uint32_t(micros() - update_start_us));
+    pending = false;
+    ++metrics.updates;
+
+    if (!lvgl_port_unlock()) ++metrics.failures;
+    metrics.mutex_hold.observe(uint32_t(micros() - lock_start_us));
+    lvgl_port_request_refresh();
+}
 
 void incrementSaturating(uint32_t &counter) {
     if (counter != UINT32_MAX) ++counter;
@@ -179,11 +289,11 @@ const char *diagnosticState(uint32_t quality) {
 }
 
 void logDiagnostics(
-    const measurement::DisplayFrame &frame,
-    uint32_t lvglWaitMaxUs,
-    uint32_t lvglHoldMaxUs,
-    uint32_t lvglLockFailures
+    const FrameDiagnostics &frame,
+    GuiMetrics &gui
 ) {
+    lvgl_port_metrics_t port{};
+    lvgl_port_get_metrics(&port, true);
     const auto &a = frame.acquisition;
     const auto &p = frame.processing;
     Serial.printf(
@@ -198,7 +308,12 @@ void logDiagnostics(
         "adc_q=%lu adc_errors=%lu "
         "processing=%lu us frame=%lu us proc_stack=%lu B "
         "frame_dropped=%lu frame_skipped=%lu frame_q=%lu "
-        "lvgl_wait_max=%lu us lvgl_hold_max=%lu us lvgl_fail=%lu\n",
+        "gui_attempted=%lu gui_updated=%lu gui_coalesced=%lu gui_busy=%lu "
+        "lvgl_wait_max=%lu us lvgl_wait_int=%lu us "
+        "lvgl_update_max=%lu us lvgl_update_int=%lu us "
+        "lvgl_hold_max=%lu us lvgl_hold_int=%lu us "
+        "lv_timer_max=%lu us lv_timer_int=%lu us "
+        "vsync_wait_max=%lu us vsync_wait_int=%lu us lvgl_fail=%lu\n",
         (unsigned long)frame.sequence,
         diagnosticState(frame.measurement.quality_flags),
         (unsigned long)a.sample_count,
@@ -233,9 +348,21 @@ void logDiagnostics(
         (unsigned long)p.dropped_frames,
         (unsigned long)p.skipped_frames,
         (unsigned long)p.ready_high_water,
-        (unsigned long)lvglWaitMaxUs,
-        (unsigned long)lvglHoldMaxUs,
-        (unsigned long)lvglLockFailures
+        (unsigned long)gui.publish_attempts,
+        (unsigned long)gui.updates,
+        (unsigned long)gui.coalesced,
+        (unsigned long)gui.mutex_busy,
+        (unsigned long)gui.mutex_wait.cumulative_us,
+        (unsigned long)gui.mutex_wait.interval_us,
+        (unsigned long)gui.update_prepared.cumulative_us,
+        (unsigned long)gui.update_prepared.interval_us,
+        (unsigned long)gui.mutex_hold.cumulative_us,
+        (unsigned long)gui.mutex_hold.interval_us,
+        (unsigned long)port.timer_handler_max_us,
+        (unsigned long)port.timer_handler_interval_max_us,
+        (unsigned long)port.vsync_wait_max_us,
+        (unsigned long)port.vsync_wait_interval_max_us,
+        (unsigned long)gui.failures
     );
 
     if (frame.valid) {
@@ -254,37 +381,41 @@ void logDiagnostics(
             (unsigned long)m.quality_flags
         );
     }
+    gui.resetInterval();
 }
 
 void loop() {
     static uint32_t lastValidMs = millis();
     static uint32_t lastFrameMs = millis();
     static uint32_t lastDiagnosticMs = 0;
-    static uint32_t lvglWaitMaxUs = 0;
-    static uint32_t lvglHoldMaxUs = 0;
-    static uint32_t lvglLockFailures = 0;
     static uint32_t activeFault = measurement::kQualityNone;
     static bool holdVisible = false;
     static QualityCounters qualityCounters;
+    static measurement::GuiSnapshot guiSnapshot;
+    static GuiMetrics guiMetrics;
+    static bool guiPending = false;
 
     measurement::DisplayFrame *frame =
-        processor.takeLatest(pdMS_TO_TICKS(100));
+        processor.takeLatest(guiPending ? 0 : pdMS_TO_TICKS(100));
     if (frame == nullptr) {
         const uint32_t nowMs = millis();
-        if (uint32_t(nowMs - lastFrameMs) < kMissingFrameWarningMs) return;
-        if (activeFault != kMissingFrameFault) {
-            activeFault = kMissingFrameFault;
-            incrementSaturating(qualityCounters.missingFrame);
-            Serial.println("ADC_FAULT state=MISSING_FRAME");
-            logQualityCounters(qualityCounters);
+        if (uint32_t(nowMs - lastFrameMs) >= kMissingFrameWarningMs) {
+            if (activeFault != kMissingFrameFault) {
+                activeFault = kMissingFrameFault;
+                incrementSaturating(qualityCounters.missingFrame);
+                Serial.println("ADC_FAULT state=MISSING_FRAME");
+                logQualityCounters(qualityCounters);
+            }
+            if (
+                !holdVisible &&
+                uint32_t(nowMs - lastValidMs) >= kHoldAfterNoValidMs
+            ) {
+                Serial.println("HOLD | brak nowej ramki pomiarowej");
+                holdVisible = true;
+            }
         }
-        if (
-            !holdVisible &&
-            uint32_t(nowMs - lastValidMs) >= kHoldAfterNoValidMs
-        ) {
-            Serial.println("HOLD | brak nowej ramki pomiarowej");
-            holdVisible = true;
-        }
+        publishPendingGui(guiSnapshot, guiPending, guiMetrics);
+        if (guiPending) delay(1);
         return;
     }
 
@@ -292,9 +423,11 @@ void loop() {
     lastFrameMs = nowMs;
     const bool logNow = kPeriodicDiagnostics &&
         uint32_t(nowMs - lastDiagnosticMs) >= 1000;
+    const FrameDiagnostics diagnostics = captureDiagnostics(*frame);
 
     if (!frame->valid) {
         const uint32_t quality = frame->measurement.quality_flags;
+        processor.release(frame);
         countQuality(quality, qualityCounters);
 
         if (activeFault != quality) {
@@ -304,12 +437,7 @@ void loop() {
                 diagnosticState(quality),
                 (unsigned long)quality
             );
-            logDiagnostics(
-                *frame,
-                lvglWaitMaxUs,
-                lvglHoldMaxUs,
-                lvglLockFailures
-            );
+            logDiagnostics(diagnostics, guiMetrics);
             logQualityCounters(qualityCounters);
         }
 
@@ -320,63 +448,38 @@ void loop() {
             Serial.printf("HOLD | state=%s\n", diagnosticState(quality));
             holdVisible = true;
         }
-
-        processor.release(frame);
+        publishPendingGui(guiSnapshot, guiPending, guiMetrics);
         delay(5);
         return;
     }
 
-    if (activeFault != measurement::kQualityNone || holdVisible) {
+    const bool recovered =
+        activeFault != measurement::kQualityNone || holdVisible;
+    if (guiPending) ++guiMetrics.coalesced;
+    copyGuiSnapshot(*frame, guiSnapshot);
+    guiPending = true;
+    processor.release(frame);
+
+    if (recovered) {
         Serial.printf(
             "ADC_RECOVERY seq=%lu downtime=%lu ms\n",
-            (unsigned long)frame->sequence,
+            (unsigned long)diagnostics.sequence,
             (unsigned long)uint32_t(nowMs - lastValidMs)
         );
         logQualityCounters(qualityCounters);
-        logDiagnostics(
-            *frame,
-            lvglWaitMaxUs,
-            lvglHoldMaxUs,
-            lvglLockFailures
-        );
+        logDiagnostics(diagnostics, guiMetrics);
+        lastDiagnosticMs = nowMs;
     }
     activeFault = measurement::kQualityNone;
     holdVisible = false;
     lastValidMs = nowMs;
 
-    const uint32_t lockRequest = micros();
-    if (lvgl_port_lock(100)) {
-        const uint32_t lockStart = micros();
-        const uint32_t waitUs = uint32_t(lockStart - lockRequest);
-        if (waitUs > lvglWaitMaxUs) lvglWaitMaxUs = waitUs;
-        sine_view::updatePrepared(
-            frame->y,
-            frame->rms_y,
-            frame->rms_value_text,
-            frame->maximum_value_text,
-            frame->frequency_value_text,
-            frame->measurement.frequency
-        );
-        lvgl_port_unlock();
-        lvgl_port_request_refresh();
-        const uint32_t holdUs = uint32_t(micros() - lockStart);
-        if (holdUs > lvglHoldMaxUs) lvglHoldMaxUs = holdUs;
-    } else {
-        const uint32_t waitUs = uint32_t(micros() - lockRequest);
-        if (waitUs > lvglWaitMaxUs) lvglWaitMaxUs = waitUs;
-        ++lvglLockFailures;
-    }
+    publishPendingGui(guiSnapshot, guiPending, guiMetrics);
 
-    if (logNow) {
-        logDiagnostics(
-            *frame,
-            lvglWaitMaxUs,
-            lvglHoldMaxUs,
-            lvglLockFailures
-        );
+    if (logNow && !recovered) {
+        logDiagnostics(diagnostics, guiMetrics);
         lastDiagnosticMs = nowMs;
     }
 
-    processor.release(frame);
     delay(5);
 }

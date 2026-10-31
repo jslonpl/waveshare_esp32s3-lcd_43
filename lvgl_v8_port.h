@@ -147,6 +147,22 @@ bool lvgl_port_unlock(void);
  */
 void lvgl_port_request_refresh(void);
 
+typedef struct {
+    uint32_t timer_handler_max_us;
+    uint32_t timer_handler_interval_max_us;
+    uint32_t vsync_wait_max_us;
+    uint32_t vsync_wait_interval_max_us;
+} lvgl_port_metrics_t;
+
+/**
+ * Zwraca atomowy snapshot czasow zadania LVGL. Gdy reset_interval=true,
+ * zeruje tylko maksima biezacego interwalu; maksima narastajace pozostaja.
+ */
+void lvgl_port_get_metrics(
+    lvgl_port_metrics_t *metrics,
+    bool reset_interval
+);
+
 #ifdef __cplusplus
 }
 #endif

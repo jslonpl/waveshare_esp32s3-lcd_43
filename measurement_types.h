@@ -88,4 +88,18 @@ struct DisplayFrame {
     char frequency_value_text[16]{};
 };
 
+// Mala kopia prezentacyjna nalezaca wylacznie do loop(). Oddziela czas zycia
+// ramki procesora od oczekiwania na mutex LVGL i moze byc nadpisana nowszym
+// kompletnym wynikiem bez blokowania producenta.
+struct GuiSnapshot {
+    uint32_t sequence = 0;
+    int16_t y[kDisplayPointCount]{};
+    int16_t rms_y = 0;
+    char rms_value_text[16]{};
+    char maximum_value_text[16]{};
+    char frequency_value_text[16]{};
+    float frequency = 0;
+};
+static_assert(sizeof(GuiSnapshot) <= 1536, "GuiSnapshot przekracza 1,5 KiB");
+
 } // namespace measurement

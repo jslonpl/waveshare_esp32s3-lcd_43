@@ -20,6 +20,31 @@ static SemaphoreHandle_t lvgl_wake_sem = nullptr;
 static TaskHandle_t lvgl_task_handle = nullptr;
 static esp_timer_handle_t lvgl_tick_timer = NULL;
 static void *lvgl_buf[LVGL_PORT_BUFFER_NUM_MAX] = {};
+static portMUX_TYPE lvgl_metrics_mux = portMUX_INITIALIZER_UNLOCKED;
+static lvgl_port_metrics_t lvgl_metrics = {};
+
+static void metrics_observe(uint32_t value, uint32_t *maximum, uint32_t *interval_maximum)
+{
+    portENTER_CRITICAL(&lvgl_metrics_mux);
+    if (value > *maximum) *maximum = value;
+    if (value > *interval_maximum) *interval_maximum = value;
+    portEXIT_CRITICAL(&lvgl_metrics_mux);
+}
+
+static void wait_for_vsync(void)
+{
+    const int64_t start_us = esp_timer_get_time();
+    ulTaskNotifyValueClear(NULL, ULONG_MAX);
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    const uint32_t elapsed_us = static_cast<uint32_t>(
+        esp_timer_get_time() - start_us
+    );
+    metrics_observe(
+        elapsed_us,
+        &lvgl_metrics.vsync_wait_max_us,
+        &lvgl_metrics.vsync_wait_interval_max_us
+    );
+}
 
 #if LVGL_PORT_ROTATION_DEGREE != 0
 static void *get_next_frame_buffer(LCD *lcd)
@@ -329,8 +354,7 @@ static void flush_callback(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t
             lcd->switchFrameBufferTo(next_fb);
 
             /* Waiting for the current frame buffer to complete transmission */
-            ulTaskNotifyValueClear(NULL, ULONG_MAX);
-            ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+            wait_for_vsync();
 
             /* Synchronously update the dirty area for another frame buffer */
             flush_dirty_copy(flush_get_next_buf(lcd), color_map, &dirty_area);
@@ -360,8 +384,7 @@ static void flush_callback(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t
                 lcd->switchFrameBufferTo(next_fb);
 
                 /* Waiting for the current frame buffer to complete transmission */
-                ulTaskNotifyValueClear(NULL, ULONG_MAX);
-                ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+                wait_for_vsync();
 
                 if (probe_result == FLUSH_PROBE_PART_COPY) {
                     /* Synchronously update the dirty area for another frame buffer */
@@ -388,8 +411,7 @@ static void flush_callback(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t
         lcd->switchFrameBufferTo(color_map);
 
         /* Waiting for the last frame buffer to complete transmission */
-        ulTaskNotifyValueClear(NULL, ULONG_MAX);
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        wait_for_vsync();
     }
 
     lv_disp_flush_ready(drv);
@@ -406,8 +428,7 @@ static void flush_callback(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t
     lcd->switchFrameBufferTo(color_map);
 
     /* Waiting for the last frame buffer to complete transmission */
-    ulTaskNotifyValueClear(NULL, ULONG_MAX);
-    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    wait_for_vsync();
 
     lv_disp_flush_ready(drv);
 }
@@ -715,7 +736,16 @@ static void lvgl_port_task(void *arg)
     uint32_t task_delay_ms = LVGL_PORT_TASK_MAX_DELAY_MS;
     while (1) {
         if (lvgl_port_lock(-1)) {
+            const int64_t handler_start_us = esp_timer_get_time();
             task_delay_ms = lv_timer_handler();
+            const uint32_t handler_us = static_cast<uint32_t>(
+                esp_timer_get_time() - handler_start_us
+            );
+            metrics_observe(
+                handler_us,
+                &lvgl_metrics.timer_handler_max_us,
+                &lvgl_metrics.timer_handler_interval_max_us
+            );
             lvgl_port_unlock();
         }
         if (task_delay_ms > LVGL_PORT_TASK_MAX_DELAY_MS) {
@@ -838,6 +868,18 @@ void lvgl_port_request_refresh(void)
     if (lvgl_wake_sem != nullptr) {
         xSemaphoreGive(lvgl_wake_sem);
     }
+}
+
+void lvgl_port_get_metrics(lvgl_port_metrics_t *metrics, bool reset_interval)
+{
+    if (metrics == nullptr) return;
+    portENTER_CRITICAL(&lvgl_metrics_mux);
+    *metrics = lvgl_metrics;
+    if (reset_interval) {
+        lvgl_metrics.timer_handler_interval_max_us = 0;
+        lvgl_metrics.vsync_wait_interval_max_us = 0;
+    }
+    portEXIT_CRITICAL(&lvgl_metrics_mux);
 }
 
 bool lvgl_port_deinit(void)
