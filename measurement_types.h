@@ -70,6 +70,7 @@ struct ProcessingMetrics {
     uint32_t frame_prepare_us = 0;
     uint32_t stack_free_bytes = 0;
     uint32_t dropped_frames = 0;
+    uint32_t coalesced_frames = 0;
     uint32_t skipped_frames = 0;
     uint32_t ready_high_water = 0;
 };
@@ -88,9 +89,9 @@ struct DisplayFrame {
     char frequency_value_text[16]{};
 };
 
-// Mala kopia prezentacyjna nalezaca wylacznie do loop(). Oddziela czas zycia
-// ramki procesora od oczekiwania na mutex LVGL i moze byc nadpisana nowszym
-// kompletnym wynikiem bez blokowania producenta.
+// Mala kopia prezentacyjna przekazywana latest-only z loop() do zadania LVGL.
+// Oddziela czas zycia ramki procesora od renderowania i moze byc nadpisana
+// nowszym kompletnym wynikiem bez blokowania producenta.
 struct GuiSnapshot {
     uint32_t sequence = 0;
     int16_t y[kDisplayPointCount]{};

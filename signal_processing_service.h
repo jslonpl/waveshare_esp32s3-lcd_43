@@ -18,8 +18,8 @@ namespace signal_processing {
 constexpr BaseType_t kCore = 0;
 constexpr UBaseType_t kPriority = 2;
 constexpr uint32_t kStackBytes = 8192;
-// Jedna ramka moze byc wyswietlana, druga czekac w kolejce, a trzecia jest
-// przygotowywana. Zapobiega to utracie aktualizacji podczas krotkiego VSYNC.
+// Jedna ramka moze byc kopiowana przez loop(), druga czekac w kolejce, a
+// trzecia jest przygotowywana. Kolejka pozostaje latest-only.
 constexpr unsigned kFramePoolSize = 3;
 constexpr float kCurveTauMs = 80.0f;
 constexpr float kValuesTauMs = 160.0f;
@@ -128,6 +128,7 @@ private:
     float smoothPeak_ = 0;
     float smoothFrequency_ = 0;
     uint32_t droppedFrames_ = 0;
+    uint32_t coalescedFrames_ = 0;
     uint32_t skippedFrames_ = 0;
     uint32_t readyHighWater_ = 0;
 
@@ -148,7 +149,7 @@ private:
 
         // Reclaim only an obsolete frame still owned by the latest-only queue.
         if (xQueueReceive(ready_, &frame, 0) == pdTRUE) {
-            ++droppedFrames_;
+            ++coalescedFrames_;
             return frame;
         }
         return nullptr;
@@ -547,6 +548,7 @@ private:
         frame.processing.processing_us = uint32_t(micros() - processingStart);
         frame.processing.stack_free_bytes = uxTaskGetStackHighWaterMark(nullptr);
         frame.processing.dropped_frames = droppedFrames_;
+        frame.processing.coalesced_frames = coalescedFrames_;
         frame.processing.skipped_frames = skippedFrames_;
     }
 
@@ -563,10 +565,11 @@ private:
         if (xQueueSend(ready_, &frame, 0) != pdTRUE) {
             measurement::DisplayFrame *obsolete = nullptr;
             if (xQueueReceive(ready_, &obsolete, 0) == pdTRUE) {
-                ++droppedFrames_;
+                ++coalescedFrames_;
                 release(obsolete);
             }
             frame->processing.dropped_frames = droppedFrames_;
+            frame->processing.coalesced_frames = coalescedFrames_;
             if (xQueueSend(ready_, &frame, 0) != pdTRUE) {
                 ++droppedFrames_;
                 release(frame);

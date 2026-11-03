@@ -43,34 +43,20 @@ struct QualityCounters {
     uint32_t missingFrame = 0;
 };
 
-struct LatencyMaximum {
-    uint32_t cumulative_us = 0;
-    uint32_t interval_us = 0;
-
-    void observe(uint32_t value) {
-        if (value > cumulative_us) cumulative_us = value;
-        if (value > interval_us) interval_us = value;
-    }
-
-    void resetInterval() { interval_us = 0; }
-};
-
-struct GuiMetrics {
-    LatencyMaximum mutex_wait;
-    LatencyMaximum update_prepared;
-    LatencyMaximum mutex_hold;
-    uint32_t publish_attempts = 0;
+struct GuiMailboxMetrics {
+    uint32_t published = 0;
     uint32_t updates = 0;
     uint32_t coalesced = 0;
-    uint32_t mutex_busy = 0;
-    uint32_t failures = 0;
-
-    void resetInterval() {
-        mutex_wait.resetInterval();
-        update_prepared.resetInterval();
-        mutex_hold.resetInterval();
-    }
+    bool pending = false;
 };
+
+static portMUX_TYPE guiMailboxMux = portMUX_INITIALIZER_UNLOCKED;
+static measurement::GuiSnapshot guiMailboxSnapshot;
+static measurement::GuiSnapshot guiApplySnapshot;
+static bool guiMailboxPending = false;
+static uint32_t guiPublished = 0;
+static uint32_t guiUpdated = 0;
+static uint32_t guiMailboxCoalesced = 0;
 
 // Diagnostyka nie przechowuje tablicy punktow. Pozwala zwolnic DisplayFrame
 // przed formatowaniem i wysylaniem kosztownego logu UART.
@@ -117,39 +103,48 @@ void copyGuiSnapshot(
     snapshot.frequency = frame.measurement.frequency;
 }
 
-void publishPendingGui(
-    const measurement::GuiSnapshot &snapshot,
-    bool &pending,
-    GuiMetrics &metrics
-) {
-    if (!pending) return;
+void queueGuiSnapshot(const measurement::DisplayFrame &frame) {
+    portENTER_CRITICAL(&guiMailboxMux);
+    if (guiMailboxPending) ++guiMailboxCoalesced;
+    copyGuiSnapshot(frame, guiMailboxSnapshot);
+    guiMailboxPending = true;
+    ++guiPublished;
+    portEXIT_CRITICAL(&guiMailboxMux);
+}
 
-    ++metrics.publish_attempts;
-    const uint32_t request_us = micros();
-    if (!lvgl_port_lock(0)) {
-        metrics.mutex_wait.observe(uint32_t(micros() - request_us));
-        ++metrics.mutex_busy;
-        return;
+bool applyPendingGui(void *) {
+    portENTER_CRITICAL(&guiMailboxMux);
+    if (!guiMailboxPending) {
+        portEXIT_CRITICAL(&guiMailboxMux);
+        return false;
     }
+    guiApplySnapshot = guiMailboxSnapshot;
+    guiMailboxPending = false;
+    portEXIT_CRITICAL(&guiMailboxMux);
 
-    const uint32_t lock_start_us = micros();
-    metrics.mutex_wait.observe(uint32_t(lock_start_us - request_us));
-    const uint32_t update_start_us = micros();
     sine_view::updatePrepared(
-        snapshot.y,
-        snapshot.rms_y,
-        snapshot.rms_value_text,
-        snapshot.maximum_value_text,
-        snapshot.frequency_value_text,
-        snapshot.frequency
+        guiApplySnapshot.y,
+        guiApplySnapshot.rms_y,
+        guiApplySnapshot.rms_value_text,
+        guiApplySnapshot.maximum_value_text,
+        guiApplySnapshot.frequency_value_text,
+        guiApplySnapshot.frequency
     );
-    metrics.update_prepared.observe(uint32_t(micros() - update_start_us));
-    pending = false;
-    ++metrics.updates;
+    portENTER_CRITICAL(&guiMailboxMux);
+    ++guiUpdated;
+    portEXIT_CRITICAL(&guiMailboxMux);
+    return true;
+}
 
-    if (!lvgl_port_unlock()) ++metrics.failures;
-    metrics.mutex_hold.observe(uint32_t(micros() - lock_start_us));
-    lvgl_port_request_refresh();
+GuiMailboxMetrics getGuiMailboxMetrics() {
+    GuiMailboxMetrics metrics;
+    portENTER_CRITICAL(&guiMailboxMux);
+    metrics.published = guiPublished;
+    metrics.updates = guiUpdated;
+    metrics.coalesced = guiMailboxCoalesced;
+    metrics.pending = guiMailboxPending;
+    portEXIT_CRITICAL(&guiMailboxMux);
+    return metrics;
 }
 
 void incrementSaturating(uint32_t &counter) {
@@ -242,6 +237,9 @@ void setup() {
     bootStage("BOOT: sine_view::create start");
     sine_view::create();
     lvgl_port_unlock();
+    if (!lvgl_port_set_update_callback(applyPendingGui, nullptr)) {
+        fatalError("BLAD: callback publikacji GUI");
+    }
     lvgl_port_request_refresh();
     bootStage("BOOT: UI ready");
 
@@ -289,11 +287,11 @@ const char *diagnosticState(uint32_t quality) {
 }
 
 void logDiagnostics(
-    const FrameDiagnostics &frame,
-    GuiMetrics &gui
+    const FrameDiagnostics &frame
 ) {
     lvgl_port_metrics_t port{};
     lvgl_port_get_metrics(&port, true);
+    const GuiMailboxMetrics gui = getGuiMailboxMetrics();
     const auto &a = frame.acquisition;
     const auto &p = frame.processing;
     Serial.printf(
@@ -307,9 +305,8 @@ void logDiagnostics(
         "events=%lu missed=%lu dup_ts=%lu nonmono_ts=%lu "
         "adc_q=%lu adc_errors=%lu "
         "processing=%lu us frame=%lu us proc_stack=%lu B "
-        "frame_dropped=%lu frame_skipped=%lu frame_q=%lu "
-        "gui_attempted=%lu gui_updated=%lu gui_coalesced=%lu gui_busy=%lu "
-        "lvgl_wait_max=%lu us lvgl_wait_int=%lu us "
+        "frame_dropped=%lu frame_skipped=%lu frame_coalesced=%lu frame_q=%lu "
+        "gui_published=%lu gui_updated=%lu gui_coalesced=%lu gui_pending=%u "
         "lvgl_update_max=%lu us lvgl_update_int=%lu us "
         "lvgl_hold_max=%lu us lvgl_hold_int=%lu us "
         "lv_timer_max=%lu us lv_timer_int=%lu us "
@@ -347,22 +344,21 @@ void logDiagnostics(
         (unsigned long)p.stack_free_bytes,
         (unsigned long)p.dropped_frames,
         (unsigned long)p.skipped_frames,
+        (unsigned long)p.coalesced_frames,
         (unsigned long)p.ready_high_water,
-        (unsigned long)gui.publish_attempts,
+        (unsigned long)gui.published,
         (unsigned long)gui.updates,
-        (unsigned long)gui.coalesced,
-        (unsigned long)gui.mutex_busy,
-        (unsigned long)gui.mutex_wait.cumulative_us,
-        (unsigned long)gui.mutex_wait.interval_us,
-        (unsigned long)gui.update_prepared.cumulative_us,
-        (unsigned long)gui.update_prepared.interval_us,
-        (unsigned long)gui.mutex_hold.cumulative_us,
-        (unsigned long)gui.mutex_hold.interval_us,
+        (unsigned long)(gui.coalesced + p.coalesced_frames),
+        unsigned(gui.pending),
+        (unsigned long)port.application_update_max_us,
+        (unsigned long)port.application_update_interval_max_us,
+        (unsigned long)port.mutex_hold_max_us,
+        (unsigned long)port.mutex_hold_interval_max_us,
         (unsigned long)port.timer_handler_max_us,
         (unsigned long)port.timer_handler_interval_max_us,
         (unsigned long)port.vsync_wait_max_us,
         (unsigned long)port.vsync_wait_interval_max_us,
-        (unsigned long)gui.failures
+        (unsigned long)port.failure_count
     );
 
     if (frame.valid) {
@@ -381,7 +377,6 @@ void logDiagnostics(
             (unsigned long)m.quality_flags
         );
     }
-    gui.resetInterval();
 }
 
 void loop() {
@@ -391,12 +386,9 @@ void loop() {
     static uint32_t activeFault = measurement::kQualityNone;
     static bool holdVisible = false;
     static QualityCounters qualityCounters;
-    static measurement::GuiSnapshot guiSnapshot;
-    static GuiMetrics guiMetrics;
-    static bool guiPending = false;
 
     measurement::DisplayFrame *frame =
-        processor.takeLatest(guiPending ? 0 : pdMS_TO_TICKS(100));
+        processor.takeLatest(pdMS_TO_TICKS(100));
     if (frame == nullptr) {
         const uint32_t nowMs = millis();
         if (uint32_t(nowMs - lastFrameMs) >= kMissingFrameWarningMs) {
@@ -414,8 +406,6 @@ void loop() {
                 holdVisible = true;
             }
         }
-        publishPendingGui(guiSnapshot, guiPending, guiMetrics);
-        if (guiPending) delay(1);
         return;
     }
 
@@ -437,7 +427,7 @@ void loop() {
                 diagnosticState(quality),
                 (unsigned long)quality
             );
-            logDiagnostics(diagnostics, guiMetrics);
+            logDiagnostics(diagnostics);
             logQualityCounters(qualityCounters);
         }
 
@@ -448,17 +438,15 @@ void loop() {
             Serial.printf("HOLD | state=%s\n", diagnosticState(quality));
             holdVisible = true;
         }
-        publishPendingGui(guiSnapshot, guiPending, guiMetrics);
         delay(5);
         return;
     }
 
     const bool recovered =
         activeFault != measurement::kQualityNone || holdVisible;
-    if (guiPending) ++guiMetrics.coalesced;
-    copyGuiSnapshot(*frame, guiSnapshot);
-    guiPending = true;
+    queueGuiSnapshot(*frame);
     processor.release(frame);
+    lvgl_port_request_refresh();
 
     if (recovered) {
         Serial.printf(
@@ -467,17 +455,15 @@ void loop() {
             (unsigned long)uint32_t(nowMs - lastValidMs)
         );
         logQualityCounters(qualityCounters);
-        logDiagnostics(diagnostics, guiMetrics);
+        logDiagnostics(diagnostics);
         lastDiagnosticMs = nowMs;
     }
     activeFault = measurement::kQualityNone;
     holdVisible = false;
     lastValidMs = nowMs;
 
-    publishPendingGui(guiSnapshot, guiPending, guiMetrics);
-
     if (logNow && !recovered) {
-        logDiagnostics(diagnostics, guiMetrics);
+        logDiagnostics(diagnostics);
         lastDiagnosticMs = nowMs;
     }
 

@@ -147,11 +147,25 @@ bool lvgl_port_unlock(void);
  */
 void lvgl_port_request_refresh(void);
 
+/** Callback wykonywany przez zadanie LVGL z juz przejetym mutexem. */
+typedef bool (*lvgl_port_update_callback_t)(void *context);
+
+/** Rejestruje pojedynczego konsumenta danych aplikacji dla zadania LVGL. */
+bool lvgl_port_set_update_callback(
+    lvgl_port_update_callback_t callback,
+    void *context
+);
+
 typedef struct {
+    uint32_t application_update_max_us;
+    uint32_t application_update_interval_max_us;
+    uint32_t mutex_hold_max_us;
+    uint32_t mutex_hold_interval_max_us;
     uint32_t timer_handler_max_us;
     uint32_t timer_handler_interval_max_us;
     uint32_t vsync_wait_max_us;
     uint32_t vsync_wait_interval_max_us;
+    uint32_t failure_count;
 } lvgl_port_metrics_t;
 
 /**

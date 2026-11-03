@@ -22,6 +22,8 @@ static esp_timer_handle_t lvgl_tick_timer = NULL;
 static void *lvgl_buf[LVGL_PORT_BUFFER_NUM_MAX] = {};
 static portMUX_TYPE lvgl_metrics_mux = portMUX_INITIALIZER_UNLOCKED;
 static lvgl_port_metrics_t lvgl_metrics = {};
+static lvgl_port_update_callback_t lvgl_update_callback = nullptr;
+static void *lvgl_update_context = nullptr;
 
 static void metrics_observe(uint32_t value, uint32_t *maximum, uint32_t *interval_maximum)
 {
@@ -736,6 +738,29 @@ static void lvgl_port_task(void *arg)
     uint32_t task_delay_ms = LVGL_PORT_TASK_MAX_DELAY_MS;
     while (1) {
         if (lvgl_port_lock(-1)) {
+            const int64_t lock_start_us = esp_timer_get_time();
+            lvgl_port_update_callback_t update_callback = nullptr;
+            void *update_context = nullptr;
+            portENTER_CRITICAL(&lvgl_metrics_mux);
+            update_callback = lvgl_update_callback;
+            update_context = lvgl_update_context;
+            portEXIT_CRITICAL(&lvgl_metrics_mux);
+
+            if (update_callback != nullptr) {
+                const int64_t update_start_us = esp_timer_get_time();
+                const bool updated = update_callback(update_context);
+                const uint32_t update_us = static_cast<uint32_t>(
+                    esp_timer_get_time() - update_start_us
+                );
+                if (updated) {
+                    metrics_observe(
+                        update_us,
+                        &lvgl_metrics.application_update_max_us,
+                        &lvgl_metrics.application_update_interval_max_us
+                    );
+                }
+            }
+
             const int64_t handler_start_us = esp_timer_get_time();
             task_delay_ms = lv_timer_handler();
             const uint32_t handler_us = static_cast<uint32_t>(
@@ -746,7 +771,19 @@ static void lvgl_port_task(void *arg)
                 &lvgl_metrics.timer_handler_max_us,
                 &lvgl_metrics.timer_handler_interval_max_us
             );
-            lvgl_port_unlock();
+            const uint32_t hold_us = static_cast<uint32_t>(
+                esp_timer_get_time() - lock_start_us
+            );
+            metrics_observe(
+                hold_us,
+                &lvgl_metrics.mutex_hold_max_us,
+                &lvgl_metrics.mutex_hold_interval_max_us
+            );
+            if (!lvgl_port_unlock()) {
+                portENTER_CRITICAL(&lvgl_metrics_mux);
+                ++lvgl_metrics.failure_count;
+                portEXIT_CRITICAL(&lvgl_metrics_mux);
+            }
         }
         if (task_delay_ms > LVGL_PORT_TASK_MAX_DELAY_MS) {
             task_delay_ms = LVGL_PORT_TASK_MAX_DELAY_MS;
@@ -870,12 +907,28 @@ void lvgl_port_request_refresh(void)
     }
 }
 
+bool lvgl_port_set_update_callback(
+    lvgl_port_update_callback_t callback,
+    void *context
+)
+{
+    if (callback == nullptr) return false;
+    portENTER_CRITICAL(&lvgl_metrics_mux);
+    lvgl_update_callback = callback;
+    lvgl_update_context = context;
+    portEXIT_CRITICAL(&lvgl_metrics_mux);
+    lvgl_port_request_refresh();
+    return true;
+}
+
 void lvgl_port_get_metrics(lvgl_port_metrics_t *metrics, bool reset_interval)
 {
     if (metrics == nullptr) return;
     portENTER_CRITICAL(&lvgl_metrics_mux);
     *metrics = lvgl_metrics;
     if (reset_interval) {
+        lvgl_metrics.application_update_interval_max_us = 0;
+        lvgl_metrics.mutex_hold_interval_max_us = 0;
         lvgl_metrics.timer_handler_interval_max_us = 0;
         lvgl_metrics.vsync_wait_interval_max_us = 0;
     }
