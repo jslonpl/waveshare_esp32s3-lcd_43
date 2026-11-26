@@ -9,8 +9,20 @@
 #error "Ten projekt wymaga LVGL 8.4.0 z dolaczonej paczki."
 #endif
 
-// Widok pomiarowy. Geometria, czcionki i kolory zachowane z projektu uzytkownika.
+// Widok pomiarowy. Geometria i czcionki pozostaja stale, a cala paleta jest
+// utrzymana w cieplych, miodowo-bursztynowych odcieniach.
 namespace sine_view {
+constexpr uint32_t kColorScreenBackground = 0x171007;
+constexpr uint32_t kColorHeaderBackground = 0x24190C;
+constexpr uint32_t kColorGrid = 0x5B4220;
+constexpr uint32_t kColorAxis = 0xD2A85B;
+constexpr uint32_t kColorText = 0xF4D7A1;
+constexpr uint32_t kColorTextMuted = 0xC49A58;
+constexpr uint32_t kColorTextStrong = 0xFFF0CF;
+constexpr uint32_t kColorCopper = 0xD46A2E;
+constexpr uint32_t kColorAmber = 0xFFBF3F;
+constexpr uint32_t kColorFrequency = 0xA05A46;
+constexpr uint32_t kColorTagText = 0xFFF5DE;
 constexpr size_t kDisplayedPeriods = 3;
 constexpr int kHorizontalDivisions = int(kDisplayedPeriods) * 2;
 constexpr float kAxisLimitVolts = 400.0f;
@@ -66,7 +78,7 @@ inline int voltageToY(float volts) {
 }
 
 inline lv_obj_t *label(lv_obj_t *parent, int x, int y, const char *text,
-                  uint32_t color = 0xDCE6F0) {
+                  uint32_t color = kColorText) {
     lv_obj_t *obj = lv_label_create(parent);
     lv_label_set_text(obj, text); // LVGL kopiuje tekst z bufora lokalnego.
     lv_obj_set_style_text_font(obj, &lv_font_montserrat_16, 0);
@@ -115,9 +127,9 @@ inline MetricValue metricValueLabel(
     const int unitY = kHeaderValueY +
         (lv_font_montserrat_26.line_height - unitFont->line_height) / 2;
     lv_obj_t *titleLabel = label(
-        parent, columnX + 14, kHeaderTitleY, title, 0x9CAEBF);
+        parent, columnX + 14, kHeaderTitleY, title, kColorTextMuted);
     lv_obj_t *unitLabel = label(
-        parent, unitX, unitY, unit, 0x9CAEBF);
+        parent, unitX, unitY, unit, kColorTextMuted);
     MetricValue value;
     value.characterCount = characterCount;
 
@@ -130,7 +142,7 @@ inline MetricValue metricValueLabel(
         const int left = valueX + int(i) * valueWidth / int(value.characterCount);
         const int right = valueX + int(i + 1) * valueWidth / int(value.characterCount);
         value.characters[i] = label(
-            parent, left, kHeaderValueY, " ", 0xF4F7FA);
+            parent, left, kHeaderValueY, " ", kColorTextStrong);
         lv_obj_set_width(value.characters[i], right - left);
         lv_label_set_long_mode(value.characters[i], LV_LABEL_LONG_CLIP);
         lv_obj_set_style_text_font(value.characters[i], &lv_font_montserrat_26, 0);
@@ -186,7 +198,7 @@ inline void create() {
     lv_obj_t *screen = lv_scr_act();
     lv_obj_clean(screen);
     lv_obj_clear_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_style_bg_color(screen, lv_color_hex(0x101923), 0);
+    lv_obj_set_style_bg_color(screen, lv_color_hex(kColorScreenBackground), 0);
     lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_all(screen, 0, 0);
 
@@ -197,23 +209,23 @@ inline void create() {
     lv_obj_remove_style_all(header);
     lv_obj_set_pos(header, kHeaderX, kHeaderY);
     lv_obj_set_size(header, kHeaderWidth, kHeaderHeight);
-    lv_obj_set_style_bg_color(header, lv_color_hex(0x17232E), 0);
+    lv_obj_set_style_bg_color(header, lv_color_hex(kColorHeaderBackground), 0);
     lv_obj_set_style_bg_opa(header, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_color(header, lv_color_hex(0x344351), 0);
+    lv_obj_set_style_border_color(header, lv_color_hex(kColorGrid), 0);
     lv_obj_set_style_border_width(header, 1, 0);
     lv_obj_set_style_radius(header, 6, 0);
     lv_obj_clear_flag(header, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
 
     const int secondColumnX = kHeaderX + kHeaderColumnWidth;
     const int thirdColumnX = secondColumnX + kHeaderColumnWidth;
-    bar(screen, secondColumnX, kHeaderY + 8, 1, kHeaderHeight - 16, 0x344351);
-    bar(screen, thirdColumnX, kHeaderY + 8, 1, kHeaderHeight - 16, 0x344351);
+    bar(screen, secondColumnX, kHeaderY + 8, 1, kHeaderHeight - 16, kColorGrid);
+    bar(screen, thirdColumnX, kHeaderY + 8, 1, kHeaderHeight - 16, kColorGrid);
     bar(screen, kHeaderX + 1, kHeaderY + kHeaderHeight - 3,
-        kHeaderColumnWidth - 2, 2, 0xC4515D);
+        kHeaderColumnWidth - 2, 2, kColorCopper);
     bar(screen, secondColumnX + 1, kHeaderY + kHeaderHeight - 3,
-        kHeaderColumnWidth - 2, 2, 0xFFD700);
+        kHeaderColumnWidth - 2, 2, kColorAmber);
     bar(screen, thirdColumnX + 1, kHeaderY + kHeaderHeight - 3,
-        kHeaderWidth - 2 * kHeaderColumnWidth - 2, 2, 0x58B7C6);
+        kHeaderWidth - 2 * kHeaderColumnWidth - 2, 2, kColorFrequency);
 
     // Opis, stale pola znakow i jednostka sa osobnymi obiektami. Aktualizacja
     // cyfry nie zmienia polozenia pozostalych znakow, opisu ani jednostki.
@@ -233,14 +245,14 @@ inline void create() {
     for (int volts = -400; volts <= 400; volts += 100) {
         const int y = voltageToY(static_cast<float>(volts));
         bar(screen, kLeft, y, kWidth + 1, volts == 0 ? 2 : 1,
-            volts == 0 ? 0xCDD9E5 : 0x344351);
+            volts == 0 ? kColorAxis : kColorGrid);
         std::snprintf(text, sizeof(text), "%d", volts);
         label(screen, 27, y - 8, text);
     }
     for (int tick = 0; tick <= kHorizontalDivisions; ++tick) {
         const int x = kLeft + tick * kWidth / kHorizontalDivisions;
         bar(screen, x, kTop, tick == 0 ? 2 : 1, kHeight + 1,
-            tick == 0 ? 0xCDD9E5 : 0x344351);
+            tick == 0 ? kColorAxis : kColorGrid);
         timeTicks[tick] = label(screen, x - 16, kTop + kHeight + 12, "--");
     }
     const int timeAxisLabelY =
@@ -262,7 +274,7 @@ inline void create() {
     rmsLine = lv_line_create(screen);
     lv_obj_set_pos(rmsLine, 0, 0);
     lv_line_set_points(rmsLine, rmsLinePoints, 2);
-    lv_obj_set_style_line_color(rmsLine, lv_color_hex(0xC4515D), 0);
+    lv_obj_set_style_line_color(rmsLine, lv_color_hex(kColorCopper), 0);
     lv_obj_set_style_line_width(rmsLine, 1, 0);
     lv_obj_add_flag(rmsLine, LV_OBJ_FLAG_HIDDEN);
 
@@ -274,7 +286,7 @@ inline void create() {
     curve = lv_line_create(screen);
     lv_obj_set_pos(curve, 0, 0);
     lv_line_set_points(curve, points, kPointCount);
-    lv_obj_set_style_line_color(curve, lv_color_hex(0xFFD700), 0);
+    lv_obj_set_style_line_color(curve, lv_color_hex(kColorAmber), 0);
     lv_obj_set_style_line_width(curve, 3, 0);
     // Zaokraglanie kazdego z setek polaczen jest kosztowne programowo, a przy
     // tej gestosci punktow nie daje widocznej korzysci na panelu 800x480.
@@ -291,7 +303,7 @@ inline void create() {
         static_cast<int>(initialRmsY) - kRmsTagHeight / 2
     );
     lv_obj_set_size(rmsTag, kRmsTagWidth, kRmsTagHeight);
-    lv_obj_set_style_bg_color(rmsTag, lv_color_hex(0xC4515D), 0);
+    lv_obj_set_style_bg_color(rmsTag, lv_color_hex(kColorCopper), 0);
     lv_obj_set_style_bg_opa(rmsTag, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(rmsTag, 0, 0);
     lv_obj_set_style_radius(rmsTag, 0, 0);
@@ -300,7 +312,7 @@ inline void create() {
     lv_obj_t *rmsTagLabel = lv_label_create(rmsTag);
     lv_label_set_text(rmsTagLabel, "U RMS");
     lv_obj_set_style_text_font(rmsTagLabel, &lv_font_montserrat_16, 0);
-    lv_obj_set_style_text_color(rmsTagLabel, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_color(rmsTagLabel, lv_color_hex(kColorTagText), 0);
     lv_obj_center(rmsTagLabel);
     lv_obj_add_flag(rmsTag, LV_OBJ_FLAG_HIDDEN);
 }

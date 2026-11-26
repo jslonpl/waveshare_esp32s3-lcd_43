@@ -20,3 +20,5 @@ Thumbs.db
 # Local secrets
 .env
 secrets.h
+# Local Codex configuration
+.codex/
