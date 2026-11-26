@@ -99,7 +99,6 @@ struct GuiSnapshot {
     char rms_value_text[16]{};
     char maximum_value_text[16]{};
     char frequency_value_text[16]{};
-    float frequency = 0;
 };
 static_assert(sizeof(GuiSnapshot) <= 1536, "GuiSnapshot przekracza 1,5 KiB");
 

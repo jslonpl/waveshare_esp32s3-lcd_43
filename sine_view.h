@@ -67,7 +67,6 @@ static lv_obj_t *rmsTag = nullptr;
 static lv_obj_t *timeTicks[kHorizontalDivisions + 1]{};
 static lv_point_t rmsLinePoints[2];
 static lv_point_t points[kPointCount]; // LVGL zachowuje wskaznik: tablica musi zyc stale.
-static float displayedAxisFrequencyHz = 0.0f;
 constexpr int kRmsTagWidth = 64;
 constexpr int kRmsTagHeight = 26;
 constexpr int kRmsTagX = kLeft + kWidth - kRmsTagWidth;
@@ -162,24 +161,16 @@ inline void setMetrics(
     setMetricValue(frequencyValue, frequencyText);
 }
 
-// Wykres zawsze pokazuje trzy pelne okresy. Skala czasu wynika z aktualnie
-// zmierzonej czestotliwosci; ograniczenie aktualizacji zapobiega migotaniu
-// etykiet przy niewielkim szumie estymacji czestotliwosci.
-inline void updateTimeAxis(float frequencyHz, bool force = false) {
-    if (!(frequencyHz > 0.0f) || !std::isfinite(frequencyHz)) return;
-    if (!force && std::fabs(frequencyHz - displayedAxisFrequencyHz) < 0.25f) {
-        return;
-    }
-
-    const float periodMs = 1000.0f / frequencyHz;
+// Stala podstawa czasu odpowiada trzem okresom sygnalu 50 Hz. Etykiety osi
+// nie zaleza od chwilowych wahan estymacji czestotliwosci.
+inline void initializeTimeAxis() {
+    constexpr float kTimeStepMs = 10.0f;
     char text[16];
     for (int tick = 0; tick <= kHorizontalDivisions; ++tick) {
-        const float timeMs = periodMs * float(tick) *
-            float(kDisplayedPeriods) / float(kHorizontalDivisions);
+        const float timeMs = kTimeStepMs * float(tick);
         std::snprintf(text, sizeof(text), "%.1f", timeMs);
         lv_label_set_text(timeTicks[tick], text);
     }
-    displayedAxisFrequencyHz = frequencyHz;
 }
 
 inline void bar(lv_obj_t *parent, int x, int y, int width, int height,
@@ -258,7 +249,7 @@ inline void create() {
     const int timeAxisLabelY =
         kScreenHeight - kOuterMargin - lv_font_montserrat_16.line_height;
     label(screen, 704, timeAxisLabelY, "t [ms]");
-    updateTimeAxis(50.0f, true);
+    initializeTimeAxis();
 
     // Linia aktualnego U RMS lezy pod sinusoida. Dzieki kolejnosci tworzenia
     // zolta krzywa zachowuje swoj kolor w miejscach przeciecia.
@@ -340,8 +331,7 @@ inline void updatePrepared(
     int16_t rmsY,
     const char *rmsText,
     const char *maximumText,
-    const char *frequencyText,
-    float frequencyHz
+    const char *frequencyText
 ) {
     rmsLinePoints[0].y = static_cast<lv_coord_t>(rmsY);
     rmsLinePoints[1].y = static_cast<lv_coord_t>(rmsY);
@@ -355,6 +345,5 @@ inline void updatePrepared(
     lv_line_set_points(curve, points, kPointCount);
     lv_obj_clear_flag(curve, LV_OBJ_FLAG_HIDDEN);
     setMetrics(rmsText, maximumText, frequencyText);
-    updateTimeAxis(frequencyHz);
 }
 } // namespace sine_view

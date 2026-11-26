@@ -100,7 +100,6 @@ void copyGuiSnapshot(
         frame.frequency_value_text,
         sizeof(snapshot.frequency_value_text)
     );
-    snapshot.frequency = frame.measurement.frequency;
 }
 
 void queueGuiSnapshot(const measurement::DisplayFrame &frame) {
@@ -127,8 +126,7 @@ bool applyPendingGui(void *) {
         guiApplySnapshot.rms_y,
         guiApplySnapshot.rms_value_text,
         guiApplySnapshot.maximum_value_text,
-        guiApplySnapshot.frequency_value_text,
-        guiApplySnapshot.frequency
+        guiApplySnapshot.frequency_value_text
     );
     portENTER_CRITICAL(&guiMailboxMux);
     ++guiUpdated;
